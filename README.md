@@ -28,7 +28,8 @@ export DTITK_ROOT=/Users/userX/mri_software/thirdparty_scripts/dtitk/dtitk-2.3.3
 export PATH=${PATH}:${DTITK_ROOT}/bin:${DTITK_ROOT}/utilities:${DTITK_ROOT}/scripts
 
 \# Adding path to custom-scripts written by Moana-Filho to PATH variable
-PATH=$PATH:/Users/userX/mri_software/mri_scripts
+PATH=$PATH:/Users/userX/mri_software/mri_scripts  
+
 ------------------
 
 # Scripts Use
