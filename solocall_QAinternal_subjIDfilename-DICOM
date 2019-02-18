@@ -1,0 +1,333 @@
+#! /bin/bash
+
+# Script to check if the subj ID in the file name matches the subjID in the DICOM header
+
+# Sourcing of functions library files #
+. functionslibr_FSL
+
+# Has to define the following variables:
+# SUBJLIST # List of subjects to be processed
+# modality_list # list of the modalities to be processed
+# temp_folder # Temporary folder for files
+
+function ppsscommandfile_imageinfo {
+# Function to create the ppss command file to run "imageinfo"
+
+# Checking if there is a folder holding the DICOM header files, so it won't need to run "imageinfo" again
+if [ -d ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder} ]
+then
+	# Giving feedback to the user
+	echo
+	echo -e "The folder already exists: ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder}"
+
+	echo -e "Please check if this is correct and there is no need to run \"imageinfo\" again"
+	echo -en "Press (1) to process this file anyway or (2) to skip this file and continue "
+	read process_yesno
+
+	if [ -n "${process_yesno}" ] && [ "${process_yesno}" = 1 ]
+	then
+		# Creating the folder holding the DICOM header info
+		mkdir -p ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder} 2> /dev/null
+
+		# Imaging to process each DICOM folder
+		for item3 in `ls -d ${subjs_mainfolder}/${SUBJ}/${modality_path}/DICOM*`
+		do
+			# Getting the name of the DICOM folder into a variable
+			dicomfolder_processed=`echo ${item3} | awk -F/ '{print $(NF-1)"_"$NF}'`
+
+			# Variable with the first DICOM file within the DICOM folder
+			file_process=`ls ${item3}/*.dcm | head -1`
+
+			# Using the command line utility "imageinfo" from "Mango" to extract info from the DICOM header
+			echo "imageinfo -f $file_process > ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder}/${SUBJ}_${dicomfolder_processed}.txt" >> ${temp_folder}/${ppss_command_file}
+		done
+	else
+		echo
+		echo -en "Skipping this file "
+
+		sleep 2
+	fi
+else
+	# Creating the folder holding the DICOM header info
+	mkdir -p ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder} 2> /dev/null
+
+	# Imaging to process each DICOM folder
+	for item3 in `ls -d ${subjs_mainfolder}/${SUBJ}/${modality_path}/DICOM*`
+	do
+		# Getting the name of the DICOM folder into a variable
+		dicomfolder_processed=`echo ${item3} | awk -F/ '{print $(NF-1)"_"$NF}'`
+
+		# Variable with the first DICOM file within the DICOM folder
+		file_process=`ls ${item3}/*.dcm | head -1`
+
+		# Using the command line utility "imageinfo" from "Mango" to extract info from the DICOM header
+		echo "imageinfo -f $file_process > ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder}/${SUBJ}_${dicomfolder_processed}.txt" >> ${temp_folder}/${ppss_command_file}
+	done
+fi
+}
+
+function extract_DICOMheaderinfo {
+# Function to extract the information from the DICOM header info files
+
+# Collecting the info for the output file
+SUBJ_dicom=`grep -a "Patients Name:" ${outputfile} | awk -F: '{print $NF}' | sed 's/ //g'`
+
+scandate_dicom=`grep -a "(0029,1019)  Unknown:" ${outputfile} | awk -F: '{print $NF}' | sed 's/ //g'`
+
+modality_dicomfolder=`echo ${outputfile} | awk -F / '{print $NF}' | sed -e 's'/${SUBJ}_'//' | sed 's/.txt//' | sed 's/_DICOM//'`
+
+imagemodality_dicom=`grep -a "Protocol Name:" ${outputfile} | awk -F: '{print $NF}' | sed 's/ //g'`
+
+subjAGE_dicom=`grep -a "Patients Age:" ${outputfile} | awk -F: '{print $NF}' | sed 's/ //' | awk 'BEGIN {FS = ""} {print $2$3}'` # Note the last "awk" command to remove the extra characters (e.g. 054Y to 54)
+
+subjDOB_dicom=`grep -a "Patients Birth Date:" ${outputfile} | awk -F: '{print $NF}' | sed 's/ //' | awk 'BEGIN {FS = ""} {print $5$6"/"$7$8"/"$1$2$3$4}'` # Note the last "awk" command to get the age from the format yyyymmdd to mmddyyyy
+
+subjweight_dicom=`grep -a "Patients Weight:" ${outputfile} | awk -F: '{print $NF}' | sed 's/ //g'`
+
+# Comparing if the subj/Id of folder matches the one in the DICOM header
+if [ ${SUBJ} = ${SUBJ_dicom}_${scandate_dicom} ]
+then
+	# Variable holding result of comparison
+	subjID_comparison="subjID MATCH"
+else
+	# Variable holding result of comparison
+	subjID_comparison="subjID DIFFER"
+fi
+
+# Comparing if the MODALITY from the DICOM folder to the one in the DICOM header
+if [ "`echo "${modality_dicomfolder}"`" = anat_PD_T2 ] && [ "`echo "${imagemodality_dicom}"`" = "T2WI&PD" ]
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ "${modality_dicomfolder}" = anat_T1 ] && [ "`echo "${imagemodality_dicom}"`" = T1_MPRage ]
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $1"_"$2}'` = DWI_42dirs ] && [ "`echo "${imagemodality_dicom}"`" = ep2d_diff_42dir_7b0_p2 ] # Note the "awk" command to remove the last item in the variable content (e.g., "_01")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $1"_"$2}'` = fieldmap_DWI ] && [ "`echo "${imagemodality_dicom}"`" = gre_field_mapping_diff42 ] # Note the "awk" command to remove the last item in the variable content (e.g., "_01")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $1"_"$2}'` = fieldmap_BOLD ] && [ "`echo "${imagemodality_dicom}"`" = gre_field_mapping_BOLD ] # Note the "awk" command to remove the last item in the variable content (e.g., "_01")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $2"_"$3}'` = BOLD_intermingled ] && [ "`echo "${imagemodality_dicom}"`" = "BOLDintermingled13x3x3" ] # Note the "awk" command to remove the first item in the variable content (e.g., "frun01_")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $2"_"$3}'` = BOLD_mechanical ] && [ "`echo "${imagemodality_dicom}"`" = "BOLDmechanical3x3x3" ] # Note the "awk" command to remove the first item in the variable content (e.g., "frun01_")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $2"_"$3}'` = BOLD_auditory ] && [ "`echo "${imagemodality_dicom}"`" = "BOLDauditory3x3x3" ] # Note the "awk" command to remove the first item in the variable content (e.g., "frun01_")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $2"_"$3}'` = BOLD_simultaneous ] && [ "`echo "${imagemodality_dicom}"`" = "BOLDsimultaneous3x3x3" ] # Note the "awk" command to remove the first item in the variable content (e.g., "frun01_")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $1"_"$2}'` = fieldmap_restingASL ] && [ "`echo "${imagemodality_dicom}"`" = gre_field_mapping_pcasl ] # Note the "awk" command to remove the last item in the variable content (e.g., "_01")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $1"_"$2}'` = fieldmap_restingBOLD ] && [ "`echo "${imagemodality_dicom}"`" = gre_field_mapping_restingbold ] # Note the "awk" command to remove the last item in the variable content (e.g., "_01")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $2}'` = ASL ] && [ "`echo "${imagemodality_dicom}"`" = "ep2d_pcasl1_UI_PHC_p460measurements" ] || [ "`echo "${imagemodality_dicom}"`" = "ep2d_pcasl2_UI_PHC_p460measurements" ] # Note the "awk" command to remove the first item in the variable content (e.g., "frun01_")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+elif [ `echo "${modality_dicomfolder}" | awk -F_ '{print $2}'` = BOLD ] && [ "`echo "${imagemodality_dicom}"`" = "RESTING_BOLD1" ] || [ "`echo "${imagemodality_dicom}"`" = "RESTING_BOLD2" ] # Note the "awk" command to remove the first item in the variable content (e.g., "frun01_")
+then
+	# Variable holding result of comparison
+	modality_comparison="modality MATCH"
+
+else
+	# Variable holding result of comparison
+	modality_comparison="modality DIFFER"
+fi
+
+# Exporting the info to the output file
+echo "${SUBJ}:${SUBJ_dicom}_${scandate_dicom}:${subjID_comparison}:${modality_dicomfolder}:${imagemodality_dicom}:${modality_comparison}:${subjAGE_dicom}:${subjDOB_dicom}:${subjweight_dicom}" >> ${output_mainfolder}/${output_mainfile}
+
+# Cleaning the contents of the variables below
+unset SUBJ_dicom scandate_dicom modality_dicomfolder imagemodality_dicom subjAGE_dicom subjDOB_dicom subjweight_dicom subjID_comparison modality_comparison
+}
+
+################ VARIABLES TO BE USED IN THIS SCRIPT #################
+# Variable for the folder within "/tmp" for temporary files
+temp_folder=/tmp/ppss_tempdir
+
+# Variable with the basename for the file holding the commands for PPSS processing
+ppss_command_file=ppss_processing_file.txt
+
+# Variable with folder for main output file
+# output_mainfolder=/Users/moanae/mri_testing/QA_mri_files
+output_mainfolder=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/QA_mri_files/fileinfo_dicomheader
+
+# Variable with main outputfile name
+output_mainfile=QA_subjIDfilename-DICOM_match.txt
+
+# Variable with the QA folder name to be create within the subject's folder
+QA_folder=QA_fileinfo
+
+# Main folder holding subject's folders
+# subjs_mainfolder=/Users/moanae/mri_testing/subjs
+subjs_mainfolder=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/subjs
+
+SUBJLIST="FM0001_20121203 FM0007_20130415 FM0097_20121011 FM0530_20121114 FM0608_20120501 FM0663_20120402 FM0757_20120404 FM0761_20120225 FM0765_20120508 FM0770_20120801 FM0785_20120430 FM0796_20120822 FM0797_20120424 FM0804_20120820 FM0826_20120802 FM0833_20120328 FM0867_20120920 FM1071_20121130 FM2001_20120926 FM2162_20120629 FM2382_20121010 FM2383_20121212 FM2388_20121023 FM2439_20130116 FM2443_20130115 FM2451_20130128 FM2465_20130214 FM2473_20130213 FM2474_20130219 FM2526_20130402 HC0002_20121214 HC0003_20130110 HC0068_20120918 HC0102_20121003 HC0182_20120620 HC0229_20120227 HC0249_20120312 HC0267_20111214 HC0287_20120726 HC0293_20120626 HC0303_20111219 HC0308_20120814 HC0436_20120206 HC0436_20120220 HC0560_20120618 HC0588_20120128 HC0610_20120808 HC0782_20120725 HC0813_20120702 HC2054_20121026 HC2062_20130328 HC2105_20121217 HC2106_20121120 HC2128_20121107 HC2246_20111119 HC2277_20120101 HC2284_20121109 HC2422_20121129 HC2436_20121220 HC2501_20130305 HC2515_20130320"
+
+# SUBJLIST="FM0001_20121203 HC0002_20121214"
+
+modality_list="anat DWI func rest"
+######################################################################
+
+clear
+
+cd /tmp
+
+# Removing all temporary fsf templates and their temp folder within "/tmp" that might be present from previously aborted processing
+rm -rf ${temp_folder} 2> /dev/null
+
+# Creating the temp folder
+mkdir ${temp_folder} 2> /dev/null
+
+# Creating the folder to hold the main output file
+mkdir -p ${output_mainfolder} 2> /dev/null
+
+# Allowing the user to choose what processing to do
+echo
+echo -e "Please choose the processing option"
+echo -e "1. Run \"imageinfo\" command line utility to gather the header info from DICOM files for all subjects, then extract the info from all subjects' files into a main outputfile for excel import"
+echo -e "2. Only extract the info from all subjects' files into a main outputfile for excel import (DICOM header info already available)"
+
+echo
+echo -en "Please enter your option here: "
+read process_choice
+
+# Checking the user's option
+if [ -n "${process_choice}" ] && [ "${process_choice}" = 1 ] # Looking if this variable is not empty and if it is equal to 1
+then
+	#################################################################################
+	# Giving feedback to the user
+	echo
+	echo -en "Preparing the ppss command file to output the DICOM header info using the command line utility \"imageinfo\" from \"Mango\" "
+
+	# Loop for processing each subject
+	for SUBJ in ${SUBJLIST}
+	do
+		# Loop to process each imaging modality
+		for item2 in ${modality_list}
+		do
+			# Checking if it is a valid modality for the subject (i.e, if the subject has images of this modality)
+			if [ -d ${subjs_mainfolder}/${SUBJ}/${item2} ]
+			then
+				# Checking if it is an "anat" folder, since it has a different file structure
+				if [ ${item2} = anat ]
+				then
+					# Creating a variable to have the correct path for "anat" or other image modalities
+					modality_path=anat
+
+					# FUNCTION CALL: calling function "ppsscommandfile_imageinfo" to create the ppss command file to run "imageinfo"
+					ppsscommandfile_imageinfo
+				else
+					# Loop to go through each subfolder of the modality
+					for subfolder in `ls -d ${subjs_mainfolder}/${SUBJ}/${item2}/*`
+					do
+						# Creating a variable to have the correct path for "anat" or other image modalities
+						modality_path=`echo ${subfolder} | awk -F/ '{print $(NF-1)"/"$NF}'`
+
+						# FUNCTION CALL: calling function "ppsscommandfile_imageinfo" to create the ppss command file to run "imageinfo"
+						ppsscommandfile_imageinfo
+					done
+				fi
+			fi
+		done
+	done
+
+	# Calling the function "parallel_processing_ppss" (functionslibr_FSL) to run FEAT command. Note 4 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run; 3) parameter to indicate that the PPSS log files should be deleted by the function 4) list of unique identifiers for differentiating commands, e.g. a list of subjects. NOT USING THE 4th PARAMETER, SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS)
+	parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+	#################################################################################
+fi
+
+# Checking the user's option
+if [ -n "${process_choice}" ] && [ "${process_choice}" = 1 ] || && [ "${process_choice}" = 2 ] # Looking if this variable is not empty and if it is equal to 1 OR 2
+then
+	#################################################################################
+	# Creating the output file for the subject being processed with headers
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -e "Extracting the information from the DICOM header output files"
+
+	echo "subjID_foldername:subjID_DICOM:SubjID comparison:DICOM folder name:imagemodality_DICOM:Modality comparison:subj age(yrs):subj DOB(mm/dd/yyyy):subj weight(kg)" > ${output_mainfolder}/${output_mainfile}
+
+	# Loop for processing each subject
+	for SUBJ in ${SUBJLIST}
+	do
+		# Giving feedback to the user
+		echo -e "\n"
+		echo -en "Processing subject \"${SUBJ}\" "
+
+		# Loop to process each imaging modality
+		for item2 in ${modality_list}
+		do
+			# Checking if it is a valid modality for the subject (i.e, if the subject has images of this modality)
+			if [ -d ${subjs_mainfolder}/${SUBJ}/${item2} ]
+			then
+				# Checking if it is an "anat" folder, since it has a different file structure
+				if [ ${item2} = anat ]
+				then
+					# Creating a variable to have the correct path for "anat" or other image modalities
+					modality_path=anat
+
+					# Loop to go through each output file
+					for outputfile in `ls ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder}/${SUBJ}_*DICOM*.txt`
+					do
+						# FUNCTION CALL: calling function "extract_DICOMheaderinfo" to extract the information from the DICOM header info files
+						extract_DICOMheaderinfo
+					done
+				else
+					# Loop to go through each subfolder of the modality
+					for subfolder in `ls -d ${subjs_mainfolder}/${SUBJ}/${item2}/*`
+					do
+						# Creating a variable to have the correct path for "anat" or other image modalities
+						modality_path=`echo ${subfolder} | awk -F/ '{print $(NF-1)"/"$NF}'`
+
+						# Loop to go through each output file
+						for outputfile in `ls ${subjs_mainfolder}/${SUBJ}/${modality_path}/${QA_folder}/${SUBJ}_*.txt`
+						do
+							# FUNCTION CALL: calling function "extract_DICOMheaderinfo" to extract the information from the DICOM header info files
+							extract_DICOMheaderinfo
+						done
+					done
+				fi
+			fi
+		done
+	done
+	#################################################################################
+fi
+
+echo -e "\nDone"
+echo -en "Press any key to delete the temporary files "
+read -n1 anykey
+
+rm -rf ${temp_folder}
+exit

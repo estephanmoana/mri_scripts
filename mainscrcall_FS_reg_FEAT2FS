@@ -1,0 +1,104 @@
+#! /bin/bash
+
+# This script will register the FEAT output of a subjects functional run to the Free Surfer anatomical
+# Each functional run must be registered to the FEAT anatomical
+# Do not use the GFEAT folder of a second level analyzes as an input for this registration process
+
+# Setting Ctrl + C as key combination to go back to main menu
+trap "echo -e '\n\nGoing back to the main menu\n'; sleep 2; exit" SIGINT
+
+clear
+
+# This will read the folder that contains the FEAT directory to be registered
+echo -e "\tThis program will register the FEAT results for each individual functional run of each subject to their FreeSurfer anatomicals\n"
+echo -e "\tPlease enter the info requested\n"
+echo -e "\tFirst you will need to enter the location for the FEAT folders\n"
+echo -e "\tFEAT folder directories are usually stored at you \"analysis/1st_level\" folder\n"
+echo -e "\tEnter the absolute path here, i.e., from the root directory\n"
+echo -e "\tBut DO NOT enter the specific subject folder - it is not needed\n"
+echo -e "\tThen you will enter the path where the FreeSurfer analysis is (your SUBJECTS_DIR)\n"
+echo -e "\tNote that this will override whatever SUBJECTS_DIR value that is provided by FreeSurfer initial script during shell opening - this is ok\n"
+while [ 1 ]
+do
+	echo -en "\t\tEnter the location for the subjects FEAT folders: "
+	read feat_fold
+	echo
+	echo -e "\tThis is the current SUBJECTS_DIR: `echo ${SUBJECTS_DIR}`\n"
+	echo -en "\t\tIf different than the above, enter the folder that holds the FreeSurfer analysis: "
+	read SUBJECTS_DIR
+	echo -e "\n"
+	echo -e "\tEntered FEAT folders location contains these folders: \n\n`ls ${feat_fold}|more`"
+	echo -e "\n"
+	echo -e "\tEntered SUBJECTS_DIR contains these folders: \n\n`ls ${SUBJECTS_DIR}|more`"
+	echo -e "\n"
+	echo -en "\t\tPlease confirm if the above are the desired FEAT folder and the FreeSurfer analysis folder [y/n] "
+	read -n1 answer
+	case $answer in
+	Y | y)	echo
+			echo -e "\n\tFolders entered accepted\n"
+			echo -en "\tNow you will enter the subjects info "
+			sleep 2
+			break ;;
+	N | n)	echo
+			echo -e "Since this is/are not the correct folder(s), please re-enter it"
+			sleep 2
+			clear ;;
+	esac
+done
+
+# Entering the subjects and confirming the entered info
+while [ 1 ]
+do
+	echo -e "\n"
+	echo -en "\tPlease enter the subjects to be analyzed using the scandate and subject ID in the format \"yyyymmdd_ID\". Each entry must be separated by a space: "
+	read SUBJLIST
+	echo
+	echo -e "\tIf you have different versions for each FEAT folders listed above, you can enter a unique string (name) that will distiguish the desired version from the others\n"
+	echo -e "\tThis string should be located at the end of the FEAT folder name, right before the \".feat\" - otherwise this program won't be able to use it correctly\n"
+	echo -en "\tEnter here the unique string (if you have only one version, leave it blank pressing enter): "
+	read feat_unique
+	echo
+	echo -e "\n\tSubjects entered are: `echo -e ${SUBJLIST}`\n"
+	echo -e "\tFEAT folder unique string entered, if any is: `echo ${feat_unique}`"
+	echo -en "\n\tIs this correct, in order for the registration to proceed?[y/n] "
+	read -n1 answer02
+	case $answer02 in
+	Y | y)	echo
+			echo -e "\n\tRegistration will proceed now\n"
+			sleep 2
+			break ;;
+	N | n)	echo
+			echo -e "Please re-enter the information\n"
+			sleep 2
+			clear ;;
+	esac
+done
+
+# Here the registration will take place
+# reg-feat2anat is the command from FreeSurfer that does the automatic registration
+# The FEAT folder entered must contain the example_func file, according to reg-feat2anat help file
+for SUBJ in ${SUBJLIST}
+do
+	echo
+	echo -e "\tRegistering FEAT folders for subject ${SUBJ}\n"
+	# Listing all functional runs for each subject
+	FRUN_LIST=`ls -d ${feat_fold}/${SUBJ}_frun*${feat_unique}.feat`
+	for FRUN in ${FRUN_LIST}
+	do
+		# Command to use in local computer
+		#reg-feat2anat --feat ${FRUN} --subject ${SUBJ}
+
+		# Command to use in Emerald
+		bsub reg-feat2anat --feat ${FRUN} --subject ${SUBJ}
+
+		## echo -e "${FRUN}\n" LINE USED DURING SCRIPT #TESTING
+		## echo -e "Registration command here\n"  LINE USED DURING SCRIPT #TESTING
+	done
+	echo -e "\tRegistration of FEAT folders for ${SUBJ} done\n"
+done
+echo -e "\n\tAll subjects FEAT folders registered to Free Surfer anatomical\n"
+echo -e "\tPlease check the results of the registration in the folder \"analysis/1st_level/SUBJ_frunXX.feat/reg/freesurfer\"\n"
+echo -en "\tPress any key to continue "
+read -n 1 anykey
+echo
+clear

@@ -1,0 +1,1077 @@
+#! /bin/bash
+
+# Files decompression script #
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+# emptvar="${SUBJS_FOLDERS_PATH}"
+# var_checked="THE MAIN FOLDER HOLDING SUBJECT(S) FOLDERS"
+# checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+
+function zipfiles_folder {
+while [ 1 ]
+do
+	# In this menu the user will enter the information to localize the compressed files
+	echo
+	echo -e "Here you will enter the path for the \"raw_mri_data\" folder\n"
+	echo -e "You must enter the path for main folder that contains subfolders with the compressed raw mri data for subject(s) - your \"raw data\" folder, e.g. \"/media/hard_disk/project_xxxxxxx/raw_mri_data\"\n"
+# 	echo -e "\tYou DO NOT need to enter the specific folder for a subject's raw mri data - this program can search for the subjects (that you especified earlier) within the \"raw_mri_data\" folder\n"
+
+	read -p "Enter path here: " ZIPDIR
+
+	# Checking if the folder entered for compressed raw data exists
+	echo
+	echo -e "\tYou entered the folder \"${ZIPDIR}\""
+	echo -e "\twhich contains the  folders below:\n"
+
+	# listing the contents of the folder in "ZIPDIR"
+	cd ${ZIPDIR}
+
+	# Establishing the initial subject numbering
+	item_number=1
+
+	for item in `ls -d */ | sed 's!/!!'`
+	do
+		item_number=`printf "%02d" ${item_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+		echo "${item_number}) $item"
+
+		# Adding a unit to the variable item_number
+		item_number=$[10#$item_number + 1 ]
+	done
+
+	unset item_number
+
+	echo
+	read -p "Is this correct? (y/n) " yesno
+
+	if [ $yesno = y ] || [ $yesno = Y ]
+	then
+		echo -e "\n"
+		echo -en "\tPath to compressed raw mri data accepted "
+
+		sleep 1
+
+		break
+	else
+		echo
+		echo -en "\tPlease re-enter the path to compressed \"raw_mri_data\" folder "
+
+		sleep 2
+	fi
+done
+
+cd /tmp
+}
+
+# function unzipfiles_checksubj01 {
+# # First checking if the subject name listed as "SUBJ" is the same as in the raw data folder
+# echo
+# echo -e "\nChecking if there is any mismatch between subjects ID and folder names within the raw data folder"
+# 
+# for SUBJ in ${SUBJLIST_local}
+# do
+# 	SUBJ_CHECK=`ls ${ZIPDIR} | grep ${SUBJ}`
+# 	if [ -z ${SUBJ_CHECK} ]
+# 	then
+# 		# Collecting all subjects that ID does not match folder name in raw data folder. This parameter substitution will remove the skipped subject from the variable SUBJLIST_local created earlier
+# 		SUBJLIST_local=${SUBJLIST_local/$SUBJ/}
+# 
+# 		# This is collect all excluded subject to present the list later to the user
+# 		SUBJLIST_EXCLUDED="${SUBJ} ${SUBJLIST_EXCLUDED}"
+# 
+# 		echo
+# 		echo -e "*** The subjectID for \"${SUBJ}\" does not match any folder within the raw data folder \"${ZIPDIR}\" ***\n"
+# 		echo -e "For this program to work correctly, a match between subjectID and folder name within raw data folder is MANDATORY!"
+# 		echo -en "Press any key to SKIP this subject and continue to the next one, or press Control+C to go back to the PROCESSING menu "
+# 		read anykey
+# 	fi
+# done
+# 
+# echo
+# echo -en "Checking procedure done - continuing..."
+# sleep 1
+# }
+
+
+##### NEED TO FIND A SOLUTION FOR SUBJECTS WITH MORE THAN ONE RAW DATA FOLDER #####
+
+function unzipfiles_checksubj01 {
+# First checking if the subject name listed as "SUBJ" is the same as in the raw data folder
+echo
+echo -e "\nChecking if there is any mismatch between each subjects' \"participant label\" and folder names within the raw data folder"
+
+for SUBJ in ${SUBJLIST_local}
+do
+	# Removing the "participant label" from the subject folder name
+	SUBJ_label=`echo ${SUBJ} | sed 's/sub-//'`
+
+	SUBJ_CHECK=`ls -d ${ZIPDIR}/*${SUBJ_label}*`
+	if [ -z ${SUBJ_CHECK} ]
+	then
+		# Collecting all subjects that ID does not match folder name in raw data folder. This parameter substitution will remove the skipped subject from the variable SUBJLIST_local created earlier
+		SUBJLIST_local=${SUBJLIST_local/$SUBJ/}
+
+		# This is collect all excluded subject to present the list later to the user
+		SUBJLIST_EXCLUDED="${SUBJ} ${SUBJLIST_EXCLUDED}"
+
+		echo
+		echo -e "*** The \"participant label\" for \"${SUBJ}\" does not match any folder within the raw data folder \"${ZIPDIR}\" ***\n"
+		echo -e "For this program to work correctly, a match between subjectID and folder name within raw data folder is MANDATORY!"
+		echo -en "Press any key to SKIP this subject and continue to the next one, or press Control+C to go back to the PROCESSING menu "
+		read anykey
+	fi
+done
+
+echo
+echo -en "Checking procedure done - continuing..."
+sleep 1
+}
+
+# function unzipfiles_checksubj02 {
+# # Checking if there was any subject excluded to report it to the user
+# if [ -n "${SUBJLIST_EXCLUDED}" ]
+# then
+# 	echo
+# 	echo -e "There was a mismatch between a subject's ID and folder name within the raw data folder, and the following subjects were not processed:\n"
+# 
+# 	# Using a loop so each subject is listed in a single line
+# 	for item in  ${SUBJLIST_EXCLUDED}
+# 	do
+# 		echo ${item}
+# 	done
+# 
+# 	echo
+# 	echo -e "And these subjects had their files processed:\n"
+# 
+# 	# Using a loop so each subject is listed in a single line
+# 	for item in  ${SUBJLIST_local}
+# 	do
+# 		echo ${item}
+# 	done
+# else
+# 	echo -e "All subjects listed here had their files processed:\n"
+# 
+# 	# Using a loop so each subject is listed in a single line
+# 	for item in  ${SUBJLIST_local}
+# 	do
+# 		echo ${item}
+# 	done
+# fi
+# }
+
+function unzipfiles_checksubj02 {
+# Checking if there was any subject excluded to report it to the user
+if [ -n "${SUBJLIST_EXCLUDED}" ]
+then
+	echo
+	echo -e "There was a mismatch between a subject's \"participant label\" and folder name within the raw data folder, and the following subjects were not processed:\n"
+
+	# Using a loop so each subject is listed in a single line
+	for item in  ${SUBJLIST_EXCLUDED}
+	do
+		echo ${item}
+	done
+
+	echo
+	echo -e "And these subjects had their files processed:\n"
+
+	# Using a loop so each subject is listed in a single line
+	for item in  ${SUBJLIST_local}
+	do
+		echo ${item}
+	done
+else
+	echo -e "All subjects listed here had their files processed:\n"
+
+	# Using a loop so each subject is listed in a single line
+	for item in  ${SUBJLIST_local}
+	do
+		echo ${item}
+	done
+fi
+}
+
+function unzip_data {
+##########	THIS FUNCTION WILL UNCOMPRESS FUNCTIONAL RUN RAW DATA FILES		##########
+
+##### VARIABLES TO BE USED IN THIS FUNCTION AND SUBSEQUENT ONES #####
+# Variable holding data type to be processed
+data_type=$1
+#####################################################################
+
+clear
+
+for SUBJ in ${SUBJLIST_local}
+do
+	cd /tmp
+	
+	while [ 1 ]
+	do
+		# Ask user to enter compressed functional files to be processed
+		echo
+		echo -e "Uncompressing ${data_type} files for *** ${SUBJ} ***"
+
+		# Removing the "participant label" from the subject folder name
+		SUBJ_label=`echo ${SUBJ} | sed 's/sub-//'`
+		
+		# Informing the user about the folders that exist for the subject
+		echo -e "Folder(s) for this subject is/are:"
+		
+		ls -d ${ZIPDIR}/*${SUBJ_label}*
+		
+		# Informaing the user about the files that exist for the subject
+		echo
+		echo -e "Subject's files contained in ${ZIPDIR}:\n"
+
+		ls ${ZIPDIR}/*${SUBJ_label}*/*.zip | sed 's!'${ZIPDIR}/.*${SUBJ_label}.*/'!!' | sed "=" | sed 'N; s/\n/) /'
+
+		# Warning specific for DWI files
+		if [ ${data_type} = DWI ]
+		then
+			echo
+			echo -e "*** For SIEMENS scanners and using FSL, the ony needed file is usually named as \"series-XX_DWI_p2.zip\" ***"
+		fi
+
+		# Ask user to enter compressed files to be processed
+		# Warning specific for DWI files
+		if [ ${data_type} = ANATOMICAL ]
+		then
+			echo
+			echo -en "Enter the number(s) corresponding to the ANATOMICAL zipfile(s) for subject \"${SUBJ}\": "
+			read FILESZIPLIST
+
+			echo
+			echo -en "Now enter the contrast(s) for each anatomical file(s) respectively (T1w, T2w, PD(=proton-density); *** if more than 1 for same contrast use e.g. \"T1w_run-01\" and \"T1w_run-02\"): "
+			read CONTRAST_LIST
+
+		else
+			echo
+			read -p "Enter the numbers corresponding to the compressed files containing the ${data_type} runs (and field maps) for ${SUBJ} (use space in between if more than 1): " FILESZIPLIST
+		fi
+
+		# Collecting the zipped files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+		var1_available=`ls ${ZIPDIR}/*${SUBJ_label}*/*.zip | sed 's!'${ZIPDIR}/.*${SUBJ_label}.*/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+		var2_list="${FILESZIPLIST}" # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the zipped files available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		FILESZIPLIST="${files_to_use}"
+
+		# Cleaning the contents of the variables below
+		unset files_to_use
+
+		# Shows the data entered and ask for user confirmation
+		# Checking the variables entered # Shows the data entered and ask for user confirmation
+		echo
+		echo -e "\tPath provided for zipped data: ${ZIPDIR}"
+
+		if [ ${data_type} = ANATOMICAL ]
+		then
+			# Deleting the text files created for anatomical files, if any
+			rm -rf /tmp/anat_files_unzip 2> /dev/null
+
+			# Creates a temporary folder in /tmp
+			mkdir /tmp/anat_files_unzip 2> /dev/null
+
+			# Saving the files chosen in a text file
+			echo "${FILESZIPLIST}" > /tmp/anat_files_unzip/anat_list_${SUBJ}
+
+			# Adding the contrasts to the text file created above
+			echo "${CONTRAST_LIST}" >> /tmp/anat_files_unzip/anat_list_${SUBJ}
+
+			# Using "awk" to get the values in the temp text file in a pair format "file contrast" into a new text file. Got this function from this site <http://stackoverflow.com/questions/9534744/how-to-transfer-the-data-of-columns-to-rows-with-awk>
+			awk '{
+				for (f = 1; f <= NF; f++) { a[NR, f] = $f }
+				}
+				NF > nf { nf = NF }
+				END {
+				for (f = 1; f <= nf; f++) {
+					for (r = 1; r <= NR; r++) {
+						printf a[r, f] (r==NR ? RS : FS)
+					}
+				}
+			}' /tmp/anat_files_unzip/anat_list_${SUBJ} > /tmp/anat_files_unzip/anat_list2_${SUBJ}
+
+			echo
+			echo -e "\tAnatomical files and their respective contrast type:\n"
+
+			cat /tmp/anat_files_unzip/anat_list2_${SUBJ}
+		else
+			echo
+			echo -e "\tCompressed file names for ${data_type} runs (and field maps) entered:\n"
+
+			# Listing the files entered on each line to facilitate reading by the user
+			for item in ${FILESZIPLIST}
+			do
+				echo ${item}
+			done
+		fi
+
+		echo
+		echo -en "\t\tIs this correct? (y/n) "
+		read continue
+
+		if [ $continue = y ] || [ $continue = Y ]
+		then
+			break
+		else
+			unset FILESZIPLIST
+
+			# Deleting the text files created for anatomical files, if any
+			rm -rf /tmp/anat_files_unzip 2> /dev/null
+
+			echo
+			echo -en "Please correct the information provided "
+			sleep 2
+		fi
+	done
+
+	# Check if the zip files exists
+	echo
+	echo -e "Checking if the files entered exist in the RAW DATA folder"
+
+	for zipfile in ${FILESZIPLIST}
+	do
+		if [ -f ${ZIPDIR}/*${SUBJ_label}*/${zipfile} ]
+		then
+			echo -e "\n"
+			echo -e "${zipfile} exists"
+		else
+			echo
+			echo -e "${data_type} zip file(s) ${zipfile} entered does not exist - please check"
+		fi
+	done
+
+	########################################################
+	############## DECOMPRESSING ZIPPED FILES ##############
+	########################################################
+	for ZIPFILE in ${FILESZIPLIST}
+	do
+		echo -e "\n\n"
+		echo -e "Uncompressing ### ${ZIPFILE} ### for subject: ${SUBJ}\n"
+
+		echo -e "\tThis is where the folder to be named will be created:"
+
+		# Checking the data type to present the appropriate menu to the user
+		if [ ${data_type} = ANATOMICAL ]
+		then
+			echo -en "\t${FULLPATH}/${SUBJ}/anat/ "
+
+			# Creating the folder and subfolders to receive the uncompressed files (mkdir using the "-p" option for recursive folder creation)
+			mkdir -p ${FULLPATH}/${SUBJ}/dicomdir/anat 2> /dev/null
+
+			# Getting the contrast type into variables
+			CONTRAST=`cat /tmp/anat_files_unzip/anat_list2_${SUBJ} | grep ${ZIPFILE} | awk '{print $2}'`
+
+			# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+			cd /tmp
+
+			cd ${ZIPDIR}/*${SUBJ_label}*
+
+			echo
+			echo -en "\tUncompressing ANATOMICAL files now "
+
+			unzip -q ${ZIPFILE} -d ${FULLPATH}/${SUBJ}/dicomdir/anat/anat_${CONTRAST} # "unzip' creates the destination folder with no need to use mkdir
+
+			cd /tmp
+
+		elif [ ${data_type} = FUNCTIONAL ]
+		then
+			# Requesting user input for FUNCTIONAL run zip files name and stimulus type
+			echo -e "${FULLPATH}/${SUBJ}/dicomdir/func/\n"
+
+			echo -e "*** For FUNCTIONAL runs ***"
+			echo -e "Name the folder where to decompress this functional run using the format: frunXX_CONTRAST_stimtype"
+			echo -e "where \"XX\" is a number, e.g \"01\", \"CONTRAST\", e.g. BOLD or ASL, and \"stimtype\" is a descriptor for the stimulus used for this run, e.g. \"heatpain\"\n"
+
+			echo -e "*** For FIELD MAP images ***"
+			echo -e "If this is a field map image, please name it:\n\"fieldmap_CONTRAST_mag0X\" for magnitude images and \n\"fieldmap_CONTRAST_0X\" for processed images (X is the number of images you have)\nHAS TO BE NAMED LIKE THIS FOR PROPER PROCESSING"
+			echo -e "*** For SIEMENS SCANNERS, the first \"gre_field_mapping\" file is the magnitude image, and the second file is the phase image ***"
+			echo -e "Field map images naming follows the convention of FSL practical for fieldmap based unwarping\n"
+
+			echo -e "#### PLEASE NOTE THAT THE \"CONTRAST\" IN THE FOLDER NAME IS ESSENTIAL FOR PROPER PROCESSING ####\n"
+
+			echo -en "Please enter folder name and hit enter: "
+			read FUNCFOLDER
+
+			# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+			cd /tmp
+
+			cd "${ZIPDIR}/${SUBJ}"
+
+			# Creating the folder to receive the uncompressed files
+			mkdir ${FULLPATH}/${SUBJ}/func 2> /dev/null
+			mkdir ${FULLPATH}/${SUBJ}/func/${FUNCFOLDER}
+
+			echo
+			echo -en "\tUncompressing FUNCTIONAL files now "
+
+			# Unzip can create the final folder destination, but not 2 that do not exist yet (like creating at once ${FUNCFOLDER}/DICOM)
+			unzip -q ${ZIPFILE} -d ${FULLPATH}/${SUBJ}/dicomdir/func/${FUNCFOLDER}/
+
+			cd /tmp
+
+		elif [ ${data_type} = RESTING ]
+		then
+			# Requesting user input for RESTING zip files name
+			echo -e "${FULLPATH}/${SUBJ}/rest/\n"
+
+			echo -e "*** For RESTING runs ***"
+			echo -e "Name the folder where to decompress this resting run using the format: restingXX_CONTRAST"
+			echo -e "where \"XX\" is a number, e.g \"01\", and \"CONTRAST\" = BOLD or ASL\n"
+
+			echo -e "*** For FIELD MAP images ***"
+			echo -e "If this is a field map image, please name it:\n\"fieldmap_CONTRAST_mag0X\" for magnitude images and \n\"fieldmap_CONTRAST_0X\" for processed images (X is the number of images you have))\nHAS TO BE NAMED LIKE THIS FOR PROPER PROCESSING"
+			echo -e "*** For SIEMENS SCANNERS, the first \"gre_field_mapping\" file is the magnitude image, and the second file is the phase image ***"
+			echo -e "Field map images naming follows the convention of FSL practical for fieldmap based unwarping\n"
+
+			echo -en "Please enter folder name and hit enter: "
+			read RESTING_FOLDER
+
+			# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+			cd /tmp
+
+			cd "${ZIPDIR}/${SUBJ}"
+
+			# Creating the folder to receive the uncompressed files
+			mkdir ${FULLPATH}/${SUBJ}/rest 2> /dev/null
+			mkdir ${FULLPATH}/${SUBJ}/rest/${RESTING_FOLDER}
+
+			echo
+			echo -en "\tUncompressing RESTING files now "
+
+			# Unzip can create the final folder destination, but not 2 that do not exist yet (like creating at once ${RESTING_FOLDER}/DICOM)
+			unzip -q ${ZIPFILE} -d ${FULLPATH}/${SUBJ}/dicomdir/rest/${RESTING_FOLDER}/
+
+			cd /tmp
+
+		elif [ ${data_type} = DWI ]
+		then
+			# Requesting user input for DWI zip files name
+			echo -e "${FULLPATH}/${SUBJ}/DWI/\n"
+
+			echo -e "*** For DWI runs ***"
+			echo -e "Name the folder where to decompress this DWI run using the format: DWI_XXdirs_XX"
+			echo -e "where \"XX\" is the number of runs, e.g \"01\"\, \"XXdirs\" is how many directions your DWI scan has\n"
+
+			echo -e "*** For FIELD MAP images ***"
+			echo -e "If this is a field map image, please name it:\n\"fieldmap_DWI_mag0X\" for magnitude images and \n\"fieldmap_DWI_0X\" for processed images (X is the number of images you have))\nHAS TO BE NAMED LIKE THIS FOR PROPER PROCESSING"
+			echo -e "*** For Siemens scanners, the first \"gre_field_mapping\" file is the magnitude image, and the second file is the phase image ***"
+			echo -e "Field map images naming follows the convention of FSL practical for fieldmap based unwarping\n"
+
+			echo -en "Please enter folder name and hit enter: "
+			read DWI_FOLDER
+
+			# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+			cd /tmp
+
+			cd "${ZIPDIR}/${SUBJ}"
+
+			# Creating the folder to receive the uncompressed files
+			mkdir ${FULLPATH}/${SUBJ}/DWI 2> /dev/null
+			mkdir ${FULLPATH}/${SUBJ}/DWI/${DWI_FOLDER}
+
+			echo
+			echo -en "\tUncompressing DWI files now "
+
+			# Unzip can create the final folder destination, but not 2 that do not exist yet (like creating at once ${DWI_FOLDER}/DICOM)
+			unzip -q ${ZIPFILE} -d ${FULLPATH}/${SUBJ}/dicomdir/DWI/${DWI_FOLDER}/
+
+			cd /tmp
+		fi
+	done
+
+	# Deleting the text files created for ANATOMICAL files, if any
+	rm -rf /tmp/anat_files_unzip 2> /dev/null
+
+	# Checking if the compressed data folder is the same for the next subject
+	echo -e "\n"
+	echo -en "\t${data_type} zipped data path the same for next subject (IF LAST SUBJECT, hit y)? (y/n) "
+
+	# Ask for user input to continue
+	read yes
+	while [ 1 ]
+	do
+		case $yes in
+		Y | y)
+			echo
+			break ;;
+		N | n)
+			read -p "Provide new path for zipped data: " ZIPDIR
+			echo
+			break ;;
+		*)
+			clear
+			echo -e "No valid option chosen\n";;
+		esac
+	done
+done
+
+echo
+echo -e "\t${data_type} files uncompressed"
+
+cd /tmp
+}
+
+function unzipfiles_mainmenu {
+# Main menu for the unzip functions
+# Entering the functions with the tasks in order
+clear
+cd /tmp
+
+# # Using a local variable for the list of subjects. This will be used in the functions "unzipfiles_checksubj01" and "unzipfiles_checksubj02" in case the subjects list being processed doesn't match the RAW DATA folders
+# SUBJLIST_local="${SUBJLIST}"
+
+echo -e "This program will UNCOMPRESS zipped DICOM files\n"
+
+echo -e "Do you want to decompress:"
+echo -e "\t1. Anatomical + Functional (BOLD, ASL) (+ field maps if present) files"
+echo -e "\t\t1.1. Anatomical files only (freesurfer analysis)"
+echo -e "\t\t1.2. Functional (BOLD, ASL) (+ field maps if present) files only\n"
+
+echo -e "\tOther file types:"
+echo -e "\t2. Resting runs (BOLD, ASL) (+ field maps if present) files"
+echo -e "\t3. Diffusion weighted imaging (DWI) (+ field maps if present) files"
+echo -e "\t0. Back to main menu\n"
+
+echo -en "\t\tEnter your option here and press enter: "
+read decomp
+
+# Ask for user input to continue
+while [ 1 ]
+do
+	case ${decomp} in
+	0)
+		echo
+		break ;;
+	1)
+		echo -e "\n\n"
+		echo -e "\tUncompressing ANATOMICAL and FUNCTIONAL compressed files\n"
+
+		# Calling function "zipfiles_folder" to retrieve path to the folder holding the compressed files
+		zipfiles_folder
+
+		# Calling function unzipfiles_checksubj01 to CHECK if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj01
+
+		# Calling function "unzip_data" to decompress ANATOMICAL files. Notice the parameter used to define the data type as ANATOMICAL
+		unzip_data ANATOMICAL
+
+		# Checking if the compressed data folder for functional runs is the same as for the anatomicals
+		echo -e "\n"
+		echo -en "\tPath to compressed FUNCTIONAL data the same as for ANATOMICAL files? (y/n) "
+		# Ask for user input to continue
+		read yes
+
+		while [ 1 ]
+		do
+			case $yes in
+			Y | y)
+				echo
+				break ;;
+			N | n)
+				read -p "Provide path for zipped functional runs: " ZIPDIR
+				# Check if the zip file folder exists
+				if [ -d ${ZIPDIR} ]
+				then
+					echo
+					break
+				else
+					echo
+					echo -e "Compressed file folder entered do not exist - please check"
+				fi ;;
+			*)
+				clear
+				echo -e "No valid option chosen\n";;
+			esac
+		done
+
+		# Calling function "unzip_data" to decompress FUNCTIONAL files. Notice the parameter used to define the data type as FUNCTIONAL
+		unzip_data FUNCTIONAL
+
+		echo
+		echo -e "Uncompressed all files sucessfuly\n"
+
+		# Calling function unzipfiles_checksubj02 to REPORT to the user if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj02
+
+		# Ask for user imput to continue
+		echo
+		echo -en "To continue, press any key "
+		read -n 1 anykey
+
+		break ;;
+	1.1)
+		echo
+		echo -e "\tUncompressing ANATOMICAL compressed files only\n"
+
+		# Calling function "zipfiles_folder" to retrieve path to the folder holding the compressed files
+		zipfiles_folder
+
+		# Calling function unzipfiles_checksubj01 to CHECK if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj01
+
+		# Calling function "unzip_data" to decompress ANATOMICAL files. Notice the parameter used to define the data type as ANATOMICAL
+		unzip_data ANATOMICAL
+
+		echo
+		echo -e "Uncompressed all files sucessfuly\n"
+
+		# Calling function unzipfiles_checksubj02 to REPORT to the user if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj02
+
+		# Ask for user imput to continue
+		echo
+		echo -en "To continue, press any key "
+		read -n 1 anykey
+
+		break ;;
+	1.2)
+		echo -e "\n\n"
+		echo -e "\tUncompressing FUNCTIONAL compressed files only\n"
+
+		# Calling function "zipfiles_folder" to retrieve path to the folder holding the compressed files
+		zipfiles_folder
+
+		# Calling function unzipfiles_checksubj01 to CHECK if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj01
+
+		# Calling function "unzip_data" to decompress FUNCTIONAL files. Notice the parameter used to define the data type as FUNCTIONAL
+		unzip_data FUNCTIONAL
+
+		echo
+		echo -e "Uncompressed all files sucessfuly\n"
+
+		# Calling function unzipfiles_checksubj02 to REPORT to the user if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj02
+
+		# Ask for user imput to continue
+		echo
+		echo -en "To continue, press any key "
+		read -n 1 anykey
+
+		break ;;
+	2)
+		echo -e "\n\n"
+		echo -e "\tUncompressing RESTING BOLD compressed files\n"
+
+		# Calling function "zipfiles_folder" to retrieve path to the folder holding the compressed files
+		zipfiles_folder
+
+		# Calling function unzipfiles_checksubj01 to CHECK if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj01
+
+		# Calling function "unzip_data" to decompress RESTING files. Notice the parameter used to define the data type as RESTING
+		unzip_data RESTING
+		echo
+		echo -e "Uncompressed all files sucessfuly\n"
+
+		# Calling function unzipfiles_checksubj02 to REPORT to the user if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj02
+
+		# Ask for user imput to continue
+		echo
+		echo -en "To continue, press any key "
+		read -n 1 anykey
+
+		break
+		;;
+	3)
+		echo -e "\n\n"
+		echo -e "\tUncompressing DWI compressed files\n"
+
+		# Calling function "zipfiles_folder" to retrieve path to the folder holding the compressed files
+		zipfiles_folder
+
+		# Calling function unzipfiles_checksubj01 to CHECK if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj01
+
+		# Calling function "unzip_data" to decompress DWI files. Notice the parameter used to define the data type as DWI
+		unzip_data DWI
+
+		echo
+		echo -e "Uncompressed all files sucessfuly\n"
+
+		# Calling function unzipfiles_checksubj02 to REPORT to the user if there is a mismatch between subjectID and raw data folders name
+		unzipfiles_checksubj02
+
+		# Ask for user imput to continue
+		echo
+		echo -en "To continue, press any key "
+		read -n 1 anykey
+
+		break
+		;;
+	*)
+		clear
+		echo -e "No valid option chosen\n" ;;
+	esac
+done
+}
+
+function move_files {
+# Main menu for the unzip functions
+clear
+cd /tmp
+
+# Entering the path for the DICOM files
+echo -e "This program will MOVE unzipped DICOM files\n\n"
+echo -e "\nHere you will enter the path for the \"raw data\" folder\n"
+echo -e "You must enter the path for main folder that contains subfolders with the raw data of the subject(s) - your \"raw data\" folder\n"
+# echo -e "\tYou DO NOT need to enter the specific folder for a subject's raw data - this program can search for the subjects (that you especified earlier) within the \"raw data\" folder\n"
+
+ while [ 1 ]
+ do
+	echo -en "\nPlease enter the path to the \"raw data\" (containing DICOM files) folder: "
+	read dcmfold
+
+	echo
+	echo -e "\tFind below all folders contained within the provided path for the \"raw data\"\n"
+
+	# Listing folder contents for the path contained in the variable "dcmfold"
+	ls "${dcmfold}"
+
+	echo -en "\nAre the subject(s) raw data folders listed above? (y/n) "
+	read mvdcmfold
+
+	if [ ${mvdcmfold} = y ]
+	then
+		break
+	else
+		echo -e "\nPlease re-enter the path for the raw data folder\n"
+	fi
+done
+
+##### While loop to allow user to decide if all files are to be moved or if it needs to be selected #####
+while [ 1 ]
+do
+	echo
+	echo -e "\n\tDo you want:\t1) To have both anatomical and functional files to be moved (USUAL FOR NEWLY PROCESSED SUBJECTS) or\n"
+	echo -en "\t\t\t2) you want to choose which ones (TO ADD UNPROCESSED FILES FOR EXISTING SUBJECTS)? "
+	read movefile
+
+	if [ ${movefile} = 1 ]
+	then
+		###### This will move all files entered #########
+		echo
+		echo "This will allow you to move both anatomical and functional files for the subjects selected"
+
+		# Enter the folders for each subject's DICOM files
+		for SUBJ in ${SUBJLIST}
+		do
+			# Loop for user's input for DICOM files path
+			while [ 1 ]
+			do
+				clear
+				ls "${dcmfold}"
+				echo -en "\nNow enter the folder specific for ${SUBJ}: "
+				read subjdcm
+
+				echo
+				echo "The current folder is: `echo "${dcmfold}/${subjdcm}"`"
+				echo
+				echo "Below is the contents of this folder"
+				ls "${dcmfold}/${subjdcm}"
+
+				echo
+				echo -en "\nPlease enter the folder where the DICOM files for ${SUBJ} ANATOMICAL run are located: "
+				read SUBJdcmfoldANAT
+
+				echo -en "\nNow enter the folders where the DICOM files for ${SUBJ} FUNCTIONAL runs are located (more than 1 separate with spaces): "
+				read SUBJdcmfoldFUNCLIST
+
+				echo -e "\nThis is the folder entered for the ANATOMICAL DICOM files: ${SUBJdcmfoldANAT}"
+				echo -e "\nAnd these are the folders entered for the functional DICOM files: \n${SUBJdcmfoldFUNCLIST}\n"
+				echo -en "Are these correct? (y/n) "
+				read confdcmfold
+
+				if [ ${confdcmfold} = y ]
+				then
+					break
+				else
+					echo -e "\nPlease re-enter the information for DICOM files\n"
+					sleep 3
+				fi
+			done
+
+			# Checking if folders for anatomical and functional runs were created already
+			echo -e "\nChecking if the folder for anatomical and functional runs exists\n"
+
+			cd /tmp
+			cd ${FULLPATH}/${SUBJ}
+			foldercheck=anat
+			checkfoldexist
+
+			foldercheck=func
+			checkfoldexist
+
+			cd /tmp
+			echo
+
+			# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+			cd /tmp
+
+			# Moving the DICOM files to subject's folders
+			# Moving first anatomical dcm files
+			echo -en "\nMoving the anatomical DICOM files for ${SUBJ} to \n${FULLPATH}/${SUBJ}/anat/DICOM "
+
+			# Creating the "DICOM" folder to hold the original DICOM files
+			mkdir ${FULLPATH}/${SUBJ}/anat/DICOM
+
+			cp -R ${dcmfold}/${subjdcm}/${SUBJdcmfoldANAT}/*.dcm ${FULLPATH}/${SUBJ}/anat/DICOM
+
+			echo -e "\n"
+			echo -e "\nAnatomical DICOM files moved\n"
+
+			# Moving functional dcm files
+			echo -e "\nNow moving functional DICOM files\n"
+
+			for SUBJdcmfoldFUNC in ${SUBJdcmfoldFUNCLIST}
+			do
+				echo -e "Enter folder that will hold \"${SUBJdcmfoldFUNC}\" using the format: frunXX_stimtype"
+				echo -e "where \"stimtype\" is a descriptor for the stimulus used for this run, e.g. \"heatpain\"\n"
+				echo -e "If this is a field map image, please name it "fieldmap_contrasttype_mag0X" for magnitude images and "fieldmap_contrasttype_0X" for processed images (contrasttype is the contrast used, e.g. BOLD, ASL; X is the number of images you have))\n"
+				echo -e "Field map images naming follows the convention of FSL practical for fieldmap based unwarping\n"
+				echo -en "Please enter folder name and hit enter: "
+				read dcmfunc
+
+				mkdir ${FULLPATH}/${SUBJ}/func/${dcmfunc}
+
+				echo -en "\nMoving functional DICOM files "
+
+				# Creating the "DICOM" folder to hold the original DICOM files
+				mkdir ${FULLPATH}/${SUBJ}/func/${dcmfunc}/DICOM
+
+				cp -R ${dcmfold}/${subjdcm}/${SUBJdcmfoldFUNC}/*.dcm ${FULLPATH}/${SUBJ}/func/${dcmfunc}/DICOM
+
+				echo -e "\n"
+				echo -e "\nMoved DICOM files from \"${SUBJdcmfoldFUNC}\" to ${dcmfunc}\n\n"
+
+				unset dcmfunc
+				sleep 2
+			done
+
+			cd /tmp
+		done
+
+		echo -e "\nAll DICOM files for ${SUBJ} were moved\n"
+		break
+	else
+		######### This will let the user selected which files to be moved ##########
+		echo
+		echo "This will allow you to select which files will be moved for the subjects selected"
+
+		# Checking if folders for anatomical and functional runs were created already
+		echo -e "\nChecking if the folder for anatomical and functional runs exists\n"
+		cd /tmp
+		cd ${FULLPATH}/${SUBJ}
+		foldercheck=anat
+		checkfoldexist
+
+		foldercheck=func
+		checkfoldexist
+		cd /tmp
+		echo
+
+		# Enter the folders for each subject's DICOM files
+		for SUBJ in ${SUBJLIST}
+		do
+			while [ 1 ]
+			do
+				clear
+				ls "${dcmfold}"
+				echo -en "\nNow enter the folder specific for ${SUBJ}: "
+				read subjdcm
+
+				echo
+				echo "The current folder is: `echo "${dcmfold}/${subjdcm}"`"
+				echo
+				echo "Below is the contents of this folder"
+				ls "${dcmfold}/${subjdcm}"
+
+				echo
+				echo -en "Is this correct? (y/n) "
+				read yesno
+
+				if [ ${yesno} = y ]
+				then
+					break
+				else
+					echo "Please re-enter the specific folder for this subject"
+				fi
+			done
+
+			# Loop for user's input for anatomical DICOM files path
+			echo -en "Do you want to move anatomical files for this subject? (y/n) "
+			read movanatyesno
+
+			if [ ${movanatyesno} = y ]
+			then
+				while [ 1 ]
+				do
+					echo
+					echo -en "\nPlease enter the folder where the DICOM files for ${SUBJ} ANATOMICAL run are located: "
+					read SUBJdcmfoldANAT
+					echo -e "\nThis is the folder entered for the ANATOMICAL DICOM files: ${SUBJdcmfoldANAT}"
+					echo -en "Is this correct? (y/n) "
+					read confdcmfold
+
+					if [ ${confdcmfold} = y ]
+					then
+						# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+						cd /tmp
+
+						# Moving first anatomical dcm files
+						echo -e "\nMoving the anatomical DICOM files for ${SUBJ} to \n${FULLPATH}/${SUBJ}/anat/DICOM\n"
+
+						# Creating the "DICOM" folder to hold the original DICOM files
+						mkdir ${FULLPATH}/${SUBJ}/anat/DICOM
+
+						cp -R ${dcmfold}/${subjdcm}/${SUBJdcmfoldANAT}/*.dcm ${FULLPATH}/${SUBJ}/anat/DICOM
+
+						echo -e "\nAnatomical DICOM files moved\n"
+						break
+					else
+						echo -e "\nPlease re-enter the information for anatomical files\n"
+						sleep 3
+					fi
+				done
+			else
+				echo
+			fi
+
+			# Loop for user's input for functional DICOM files path
+			echo -en "Do you want to move functional files for this subject? (y/n) "
+			read movfuncyesno
+
+			if [ ${movfuncyesno} = y ]
+			then
+				while [ 1 ]
+				do
+					echo -en "\nEnter the folders where the DICOM files for ${SUBJ} FUNCTIONAL runs are located (more than 1 separate with spaces): "
+					read SUBJdcmfoldFUNCLIST
+					echo -e "\nYou entered these folders entered for the functional DICOM files: \n${SUBJdcmfoldFUNCLIST}\n"
+					echo -en "Are these correct? (y/n) "
+					read confdcmfold
+
+					if [ ${confdcmfold} = y ]
+					then
+						# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+						cd /tmp
+
+						# Moving the DICOM files to subject's folders
+
+						# Moving functional dcm files
+						echo -e "\nNow moving functional DICOM files\n"
+
+						for SUBJdcmfoldFUNC in ${SUBJdcmfoldFUNCLIST}
+						do
+							echo -e "Enter folder that will hold \"${SUBJdcmfoldFUNC}\" using the format: frunXX_stimtype"
+							echo -e "where \"stimtype\" is a descriptor for the stimulus used for this run, e.g. \"heatpain\"\n"
+							echo -e "If this is a field map image, please name it "fieldmap_mag0X" for magnitude images and "fieldmap0X" for processed images (X is the number of images you have))\n"
+							echo -e "Field map images naming follows the convention of FSL practical for fieldmap based unwarping\n"
+							echo -en "Please enter folder name and hit enter: "
+							read dcmfunc
+
+							mkdir ${FULLPATH}/${SUBJ}/func/${dcmfunc}
+
+							echo -e "\nMoving functional DICOM files"
+
+							# Creating the "DICOM" folder to hold the original DICOM files
+							mkdir ${FULLPATH}/${SUBJ}/func/${dcmfunc}/DICOM
+
+							cp -R ${dcmfold}/${subjdcm}/${SUBJdcmfoldFUNC}/*.dcm ${FULLPATH}/${SUBJ}/func/${dcmfunc}/DICOM
+							echo -e "\nMoved DICOM files from \"${SUBJdcmfoldFUNC}\" to ${dcmfunc}\n\n"
+
+							unset dcmfunc
+							sleep 2
+						done
+					else
+						echo -e "\nPlease re-enter the information for DICOM files\n"
+						sleep 3
+					fi
+				done
+			else
+				echo
+			fi
+
+			cd /tmp
+		done
+
+		echo -e "\nAll DICOM files for ${SUBJ} were moved\n"
+		break
+	fi
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Using a local variable for the list of subjects. This will be used in the functions "unzipfiles_checksubj01" and "unzipfiles_checksubj02" in case the subjects list being processed doesn't match the RAW DATA folders
+SUBJLIST_local="${SUBJLIST}"
+######################################################################
+
+# Main menu logic for unzip/move files script
+while [ 1 ]
+do
+	clear
+	echo -e "\tHere you will select the anatomical and functional run files that will be processed\n"
+	echo -e "\t##### Please remember to have the SCAN SHEETS for each subject in order to select the CORRECT AND VALID functional run files #####\n\n"
+	echo -e "\t\tWhat do you need to do?\n"
+	echo -e "\t1. UNCOMPRESS zipped DICOM files - Use this option if your DICOM files are in compressed format\n"
+	echo -e "\t2. MOVE unzipped DICOM files - use this option if your DICOM files are NOT compressed\n"
+	echo -e "\t0. Abort and go back to main menu\n"
+	echo -en "\t\tEnter your option here: "
+	read option_unzipmov
+
+	case $option_unzipmov in
+	0)
+		echo
+		echo -en "Going back to PROCESSING menu "
+		sleep 2
+		break ;;
+	1)
+		clear
+
+		# Calls "unzipfiles_mainmenu" function
+		unzipfiles_mainmenu
+
+		break ;;
+	2)
+		clear
+
+		# Calls "movedcm" function
+		move_files
+
+		break ;;
+	*)
+		clear
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+		sleep 2 ;;
+	esac
+done

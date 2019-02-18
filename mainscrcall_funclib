@@ -1,0 +1,2635 @@
+#####################################################################################
+##########	Functions library for fMRI analysis using FSL/freesurfer	##########
+#####################################################################################
+
+##########	FUNCTIONS TO CHECK VARIOUS STEPS DURING PROCESSING SCRIPTS	##########
+
+function checkemptvar {
+# Checks if variable has content and ask for user confirmation
+# This routine is to be used in a subscript, since in case of error detected it will send the "exit" command
+if [ -z "${emptvar}" ]
+then
+	clear
+	echo -e "\tThere is information missing that will prevent proper function of this program\n"
+	echo -e "\tNo information was entered for ${var_checked}\n"
+	echo -e "\tPlease check that you entered all the necessary info by using option \"b\" in the input menu\n"
+	echo -e "\tTo enter missing information, please choose the appropriate option \"a\" in the input menu\n\n"
+	echo -en "\tPress any key to go back to the input menu "
+	read -n1 anykey
+	clear
+	exit
+else
+	echo
+fi
+}
+
+function checkemptvar2 {
+# Checks if variable has content and ask for user confirmation
+# This routine is to be used within the main script fmrianalysis_FSL as it will use the "break" command to get out of a loop
+
+if [ -z "${emptvar}" ]
+then
+	echo -e "\n\n"
+	echo -e "\tThere is information missing that will prevent proper function of this program\n"
+	echo -e "\tNo information was entered for ${var_checked}\n"
+	echo -e "\tPlease check that you entered all the necessary info by using option \"b\" in the input menu\n"
+	echo -e "\tTo enter missing information, please choose the appropriate option \"a\" in the input menu\n\n"
+	echo -en "\tPress any key to go back to the INPUT menu "
+	read -n1 anykey
+
+	# Adding a unit to the variable "error_check" to show that there was an error
+	error_check=$[ ${error_check} + 1 ]
+
+	# Variable to flag that this information is missing
+	empty_variable=yes
+else
+	echo
+fi
+}
+
+function checkemptvar3 {
+# Checks if variable has content and ask for user confirmation
+# This routine is to be used within the main script fmrianalysis_FSL not within a loop
+if [ -z "${emptvar}" ]
+then
+	echo -e "\n\n"
+	echo -e "\tThere is information missing that will prevent proper function of this program\n"
+	echo -e "\tNo information was entered for ${var_checked}\n"
+	echo -e "\tPlease check that you entered all the necessary info by using option \"b\" in the input menu\n"
+	echo -e "\tTo enter missing information, please choose the appropriate option \"a\" in the input menu\n\n"
+	echo -en "\tPress any key to go back to the INPUT menu "
+	read -n1 anykey
+
+	# Variable to flag that this information is missing
+	empty_variable=yes
+fi
+}
+
+function checkfoldexist {
+# This function will check if a folder exists from the info entered. It is assumed that such a folder exist already
+# This function uses "break", so it gets out of a loop (but not out of a subscript)
+
+# To use it in a script, you have to have these lines:
+# foldercheck=${Variable holding the folder to be tested}
+# checkfoldexist
+
+if [ -d "${foldercheck}" ] && [ -n "${foldercheck}" ]
+then
+	echo -e "\n"
+	echo -en "\tfolder ${foldercheck} exists "
+	unset foldercheck
+else
+	echo -e "\n"
+	echo -en "\t*** folder ${foldercheck} is MISSING - please check data ***"
+	unset foldercheck
+
+	echo
+	read -n1 -p "Press any key to continue to main menu " anykey
+
+	break
+fi
+}
+
+function checkfoldexist2 {
+# This function will check if a folder exists from the info entered. It is assumed that such a folder exists already
+# This function is different than the one above because it uses "exit" in the end, instead of "break" - so it will get out of a subscript
+
+# To use it in a script, you have to have these lines:
+# foldercheck=${Variable holding the folder to be tested}
+# checkfoldexist2
+
+if [ -d ${foldercheck} ] && [ -n "${foldercheck}" ]
+then
+	echo -e "\n"
+	echo -en "\tFolder ${foldercheck} exists "
+	unset foldercheck
+else
+	echo -e "\n"
+	echo -en "\t*** folder ${foldercheck} is MISSING - please check data ***"
+	unset foldercheck
+
+	echo
+	read -n1 -p "Press any key to continue to main menu " anykey
+
+	exit
+fi
+}
+#####################################################################################
+
+##########	FUNCTIONS TO BE USED FOR SPECIFIC SELECTIONS USED ACROSS SEVERAL SCRIPTS	##########
+
+function select_subjs_processing {
+######################################################
+##### Routine to choose subjects to be processed #####
+######################################################
+
+while [ 1 ]
+do
+	# Listing all subjects with folders within the EXPERIMENT folder so the user can choose which subjects are going to have their files processed
+	echo -e "\n"
+	echo -e "Choose from the below list the subjects that need their files to be processed\n"
+
+	# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+	# Establishing the initial subject numbering
+	subjnumber=1
+
+	for subj in ${SUBJLIST}
+	do
+		# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+		subjnumber=`printf "%02d" ${subjnumber}`
+
+		echo "${subjnumber}) ${subj}"
+
+		# Adding a unit to the numbering variable
+		# Note the use of "10#" - this is because numbers like 008 or 009 are interpreted as octal by bash during arithmetic operations. So by using "10#" you tell bash that these number are base 10
+		subjnumber=$[10#$subjnumber + 1 ]
+	done
+
+	# Cleaning the contents of the numbering variable
+	unset subjnumber
+
+	# Now asking for user input to which subjects are to have their files processed
+	echo
+	echo -en "Enter here the number for each subject to be processed (use space in between if more than one, enter \"all\" for the whole list): "
+	read SUBJLIST_to_process
+
+	if [ -n "${SUBJLIST_to_process}" ] && [ "${SUBJLIST_to_process}" != all ] # Checking if this variable is non-zero in length and does NOT include all subjects listed
+	then
+		# Establishing the initial subject numbering
+		subjnumber=1
+
+		# Collecting the subjects listed in the "SUBJLIST" variable into another variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+		var1_available=`for subj in ${SUBJLIST}; do echo "${subjnumber}=${subj}"; subjnumber=$[ $subjnumber + 1 ]; done` # variable with all the files in a numbered list
+		var2_list="${SUBJLIST_to_process}" # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		SUBJLIST_to_process="${files_to_use}"
+
+		# Cleaning the contents of the variables below
+		unset files_to_use
+		unset subjnumber
+
+	elif [ -n "${SUBJLIST_to_process}" ] && [ "${SUBJLIST_to_process}" = all ] # Checking if this variable is non-zero in length and does include all subjects listed
+	then
+		# Collecting all subjects listed into the variable "SUBJLIST_to_process"
+		SUBJLIST_to_process="${SUBJLIST}"
+	fi
+
+	echo
+	echo -e "You have selected the following subject(s):\n"
+
+	# Establishing tne initial subject numbering
+	subjnumber=1
+
+	# Presenting the selected anatomical files to the user
+	for subj in ${SUBJLIST_to_process}
+	do
+		# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+		subjnumber=`printf "%02d" ${subjnumber}`
+
+		echo "${subjnumber}) ${subj}"
+
+		# Adding a unit to the numbering variable
+		# Note the use of "10#" - this is because numbers like 008 or 009 are interpreted as octal by bash during arithmetic operations. So by using "10#" you tell bash that these number are base 10
+		subjnumber=$[10#$subjnumber + 1 ]
+	done
+
+	# Cleaning the contents of the numbering variable
+	unset subjnumber
+
+	echo
+	echo -en "Is this correct?(y/n) "
+	read yesno
+
+	if [ ${yesno} = y ]
+	then
+		break
+	else
+		echo
+		echo -en "Please correct the subjects to be processed "
+
+		# Cleaning the contents for the variable below for correction
+		unset SUBJLIST_to_process
+
+		sleep 2
+	fi
+done
+
+# Output of this function
+# Variable "SUBJLIST_to_process"
+# Lists all subjects to be processed
+# echo ${SUBJLIST_to_process}
+}
+
+function subjects_listed2process {
+# This function will list to the user all subjects processed and those not processed by the script invoking it
+# The script invoking must create 2 variables:
+# 1. subj_process: subjects that were processed by that script
+# 2. subj_NOT_process: subjects that were NOT processed by that script
+
+# Copy and past the code below to invoke this function:
+
+# ###### Listing the subjects processed ######
+# # FUNCTION CALL: Calls the function "subjects_listed2process" in "mainscrcall_funclib" to list to the user all subjects processed and those not processed by the script invoking it
+# subjects_listed2process
+# ################################################
+
+###### Listing the subjects processed ######
+if [ -n "${subj_process}" ] # Check if this variable has contents
+then
+	echo
+	echo -e "##############################"
+	echo -e "Subjects processed:\n"
+
+	# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+	# Establishing the initial numbering
+	count=1
+
+	for subj in ${subj_process}
+	do
+		# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+		counter=`printf "%02d" ${count}`
+
+		echo "${counter}) ${subj}"
+
+		# Adding a unit to the numbering variable
+		((count++))
+	done
+
+	echo -e "##############################"
+
+	# Cleaning the contents of the numbering variable
+	unset count
+fi
+
+# Checking there are subjects NOT to be processed
+if [ -n "${subj_NOT_process}" ] # Check if this variable has contents
+then
+	echo
+	echo -e "##############################"
+	echo -e "Subjects NOT processed:\n"
+
+	# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+	# Establishing the initial numbering
+	count=1
+
+	for subj in ${subj_NOT_process}
+	do
+		# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+		counter=`printf "%02d" ${count}`
+
+		echo "${counter}) ${subj}"
+
+		# Adding a unit to the numbering variable
+		((count++))
+	done
+
+	echo -e "##############################"
+
+	# Cleaning the contents of the numbering variable
+	unset count
+fi
+################################################
+}
+
+function modalities_processing {
+# This function allows the user to choose which MRI modalities are going to be processed by the calling script
+# The calling script MUST HAVE defined a variable named "modalities_available" within the script
+## EXAMPLE ##
+# # Assigning a variable to hold the main location of the files generated by this script
+# modalities_available="anatomical DWI func_BOLD rest_BOLD func_ASL rest_ASL"
+
+# Allowing the user to enter the image modalities to be processed
+
+while [ 1 ]
+do
+	echo
+	echo -e "### Here you can choose which MRI modalities are to be processed ###"
+	echo -e "Please choose from the below options the imaging modalities to be processed\n"
+
+	# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+	# Establishing the initial numbering
+	modality_number=1
+
+	for modality in ${modalities_available}
+	do
+		echo "${modality_number}) ${modality}"
+
+		# adding a unit to the numbering variable
+		modality_number=$[ $modality_number + 1 ]
+	done
+
+	# Cleaning the contents of the numbering variable
+	unset modality_number
+
+	# Now asking for user input to which subjects are to have their files re-oriented
+	echo
+	echo -en "Enter here the number for each modality to be processed (use space in between if more than one, enter \"all\" for the whole list): "
+	read modality_processing
+
+	if [ -n "${modality_processing}" ] && [ "${modality_processing}" != all ] # Checking if this variable is non-zero in length and does NOT include all options listed
+	then
+		# Establishing tne initial modality numbering
+		modality_number=1
+
+		# Collecting the modalitys into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+		var1_available=`for modality in ${modalities_available}; do echo "${modality_number}=${modality}"; modality_number=$[ $modality_number + 1 ]; done` # variable with all the files in a numbered list
+		var2_list=${modality_processing} # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		modality_processing="${files_to_use}"
+
+		# Cleaning the contents of the variables below
+		unset files_to_use
+
+	elif [ -n "${modality_processing}" ] && [ "${modality_processing}" = all ] # Checking if this variable is non-zero in length and does NOT include all contrasts listed
+	then
+		# Collecting all contrasts listed into the variable "contrast_choosen"
+		modality_processing="${modalities_available}"
+	fi
+
+	echo
+	echo -e "You have selected the following contrasts:\n"
+
+	# Establishing the initial numbering
+	modality_number=1
+
+	for modality in ${modality_processing}
+	do
+		echo "${modality_number}) ${modality}"
+
+		# adding a unit to the numbering variable
+		modality_number=$[ $modality_number + 1 ]
+	done
+
+	# Cleaning the contents of the numbering variable
+	unset modality_number
+
+	echo
+	echo -en "Is this correct?(y/n) "
+	read yesno
+
+	if [ ${yesno} = y ]
+	then
+		break
+	else
+		echo
+		echo -en "Please corrected the modalities entered "
+
+		# Cleaning the contents for the variable below for correction
+		unset modality_processing
+
+		sleep 2
+	fi
+done
+
+########## MAIN OUTPUT OF THIS FUNCTION #############
+########## Consolidating the modalities chosen by user into a variable ##############
+MODALITIES_PROCESSING_LIST="${modality_processing}"
+}
+
+function anatomical_contrast {
+# This function will allow the user to choose the contrast in the anatomical images to be processed
+
+##### Allowing user to select the CONTRAST type for ANATOMICAL images ######
+while [ 1 ]
+do
+	echo -e "\n"
+
+	echo -e "##################################################################################"
+	echo -e "Please choose the CONTRAST for the ANATOMICAL file that is going to be processed:"
+
+	# Establishing the initial subject numbering
+	count=1
+
+	for item in ${struct_contrast_available}
+	do
+		# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+		counter=`printf "%02d" ${count}`
+
+		echo "${counter}) ${item}"
+
+		# Adding a unit to the numbering variable
+		((count++))
+	done
+
+	echo
+	echo -en "Please enter the number of the chosen contrast: "
+	read contrast_choose
+
+	# Making the structural contrast types "struct_contrast_list" variable to be listed in a numbered list for the user
+	if [ -n "${contrast_choose}" ] # Checking if this variable is non-zero in length
+	then
+		# Establishing the initial timeseries type numbering
+		type_number=1
+
+		# Collecting the metrics listed in the "contrast_choose" variable into another variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+		var1_available=`for contrast_item in ${struct_contrast_available}; do echo "${type_number}=${contrast_item}"; ((type_number++)); done` # variable with all the files in a numbered list
+		var2_list="${contrast_choose}" # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		contrast_choose="${files_to_use}"
+
+		# Cleaning the contents of the variables below
+		unset files_to_use type_number
+
+	elif [ -z "${contrast_choose}" ] # Checking if this variable is zero in length. In this case, it will use the default metric
+	then
+		echo
+		echo -e "*** No CONTRAST was choosen ***"
+		echo -e "It will use only \"functional\" type in this case\n"
+
+		echo -en "Press any key to continue (you can change this later, if needed) "
+		read -n1 anykey
+	fi
+
+	# Showing to the user the option entered prior to processing
+	echo -e "\n"
+	echo -e "The CONTRAST for ANATOMICAL files to be processed was: ${contrast_choose}"
+
+	echo
+	echo -en "Is this correct? (y/n) "
+	read yesno
+
+	if [ ${yesno} = y ] || [ ${yesno} = Y ]
+	then
+		# Assigning the contrast chosen by user to a variable. NOTE THE USE OF THE echo COMMAND HERE TO AVOID SPACES IN THE VARIABLE CONTENT
+		CONTRAST_PROCESS=`echo ${contrast_choose}`
+
+		# Going to the processing stage
+		break
+	else
+		echo -e "\n"
+		echo -en "Please correct the CONTRAST to be used "
+
+		sleep 2
+
+		# Cleaning the contents of the variable below
+		unset contrast_choose
+	fi
+done
+}
+
+function FS_subj_mainfolder {
+# This function will allow the user to enter the main folder for subjects to be processed for FREESURFER. The variable holding this info is SUBJECTS_DIR
+
+while [ 1 ]
+do
+	# Presenting the information to the user
+	echo
+	echo -e "FREESURFER analysis main folder path is described by a variable named \"SUBJECTS_DIR\""
+
+	echo
+	echo -e "Current main folder path: ${SUBJECTS_DIR}"
+
+	echo
+	echo -e "Do you want to:"
+	echo -e "1. Keep the current path"
+	echo -e "2. Change it to another folder"
+
+	echo
+	echo -en "Please enter your option here: "
+	read user_choice
+
+	# Checking the user's choice
+	case ${user_choice} in
+	1)
+		echo -e "\n"
+		echo -en "Keeping the current contents "
+
+		sleep 2
+
+		break
+		;;
+	2)
+		echo -e "\n"
+		echo -en "Please enter here the FULL PATH for the FREESURFER main analysis folder: "
+		read FS_folder_path_chosen
+
+		# Checking if the SUBJECTS_DIR variable is not empty AND if its content is a valid folder
+		if [ -n "${FS_folder_path_chosen}" ] && [ -d "${FS_folder_path_chosen}" ]
+		then
+			echo -e "\n"
+			echo -e "This is a valid folder"
+			echo -e "This is its contents, if any:\n"
+
+			# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+			# Establishing the initial numbering
+			count=1
+
+			for subj in `ls ${FS_folder_path_chosen}`
+			do
+				# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+				counter=`printf "%02d" ${count}`
+
+				echo "${counter}) ${subj}"
+
+				# Adding a unit to the numbering variable
+				((count++))
+			done
+
+			# Cleaning the contents of the numbering variable
+			unset count
+
+			echo
+			echo -en "Press any key to continue "
+			read -n1 anykey
+
+			# Exporting this variable for other scripts to use
+			export SUBJECTS_DIR=${FS_folder_path_chosen}
+
+			break
+		else
+			echo -e "A folder named \"analysis_freesurfer\" could not be found within this folder: ${FS_folder_path_chosen}"
+			echo -e "These are the folders within the experiment main analysis folder:\n `ls ${FULLPATH}`\n"
+
+			echo
+			echo -e "\nDo you want to:"
+
+			echo -e "\t1. Create the \"analysis_freesurfer\" folder within this folder and proceed to create the subjects' individual folders"
+			echo -en "\t2. Go back to the PROCESSING menu? "
+			read user_choice2
+
+			case ${user_choice2} in
+			1)
+				echo -e "\n"
+				echo -e "This will create the folder \"analysis_freesurfer\" inside your \"experiment\" folder"
+				echo -e "Creating folder now\n"
+
+				# Creating folder analysis_freesurfer
+				mkdir ${FULLPATH}/analysis_freesurfer
+
+				# Reassigning the SUBJECTS_DIR variable to include the fullpath to the freesurfer_analysis folder
+				export SUBJECTS_DIR=${FULLPATH}/analysis_freesurfer
+
+				echo -e "Folder \"analysis_freesurfer\" created"
+				echo -en "Moving on..."
+
+				sleep 2
+
+				break ;;
+			2)
+				echo
+				echo -en "Going back to the PROCESSING MENU "
+
+				sleep 2
+
+				exit ;;
+			*)
+				echo
+				echo -en "No valid option chosen - returning to previous menu "
+
+				sleep 3
+
+				clear ;;
+			esac
+		fi
+		;;
+
+	*)
+		echo
+		echo -en "No valid option chosen - returning to previous menu "
+
+		sleep 3
+
+		clear ;;
+	esac
+done
+}
+
+function analysis_mainfolder {
+# This function allows the user to select the path to the subject's folders
+# MAIN OUTPUT: path to the analysis folder in a variable to be used by the calling script (ANALYSIS_MAINFOLDER_PATH)
+
+# It uses 1 parameters:
+	# 1) Imaging modality;
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+
+local imaging_modality="$1" # Imaging modality that will be processed
+
+echo
+echo -e "*** IMPORTANT - this program assumes the subjects folders and subfolders for *** ${imaging_modality} *** are within this path:"
+echo -e "${SUBJS_FOLDERS_PATH}\n"
+
+echo -e "These are the folders within it:\n"
+
+# Making the folders within the "analysis_mainfolder_user" variable to be listed in a numbered list for the user
+# Establishing tne initial folder numbering
+count=1
+
+for item in `ls -d ${SUBJS_FOLDERS_PATH}/*`
+do
+	# Getting the file name only into a variable
+	item_nameonly=`echo $item | awk -F/ '{print $NF}'`
+
+	# Using "printf" instead of echo. This format avoids the problem of numbers like 008 or 009 being interpreted as octal by bash during arithmetic operations.
+	printf "%02d) %b\n" ${count} ${item_nameonly}
+
+	((count++)) # Adding a unit to the variable "count"
+done
+
+# Cleaning the contents of the variable below
+unset count
+
+# Ask for user input to continue
+while [ 1 ]
+do
+	echo
+	echo -e "Do you want to:"
+	echo -e "\t1. Use the above path"
+	echo -e "\t2. Enter another path to the folder holding the subjects folders with ** INPUT ** data"
+	echo -e "\t0. Back to main menu\n"
+
+	echo -en "Please enter your option here: "
+	read option_path
+
+	case ${option_path} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+
+		sleep 2
+
+		exit
+		;;
+	1)
+		# No changes needed to be done to the variable "dwi_mainfolder_path"
+		# Variable to signal if it is using the original content for the variable "dwi_mainfolder_path"
+		default_path=yes
+
+		##### Assigning the analysis folder path to a variable to be used by the calling script #####
+		ANALYSIS_MAINFOLDER_PATH=${SUBJS_FOLDERS_PATH}
+		#############################################################################################
+
+		break ;;
+	2)
+		# Variable to signal if it is using the original content for the variable "dwi_mainfolder_path"
+		default_path=no
+
+		echo
+		echo -e "Please enter here the FULL PATH to where the subjects' folders are located"
+
+		# Checking the imaging modality being processed
+		if [ ${imaging_modality} = DWI ]
+		then
+			echo
+			echo -e "This path should point to a folder that contains individual folders for each subject. Each subject's folder contains subfolders named \"DWI/DWI_XXdirs_0X\""
+			echo -e "Example: /MAIN_folder/subfolder01/, and within it there will be one or more of these: subjID/DWI/DWI_XXdirs_0X"
+			
+		elif [ ${imaging_modality} = dMRI_HCP ]
+		then
+			echo
+			echo -e "This path should point to a folder that contains individual folders for each subject. Each subject's folder contains subfolders named \"dMRI/T1w\""
+			echo -e "Example: /MAIN_folder/subfolder01/, and within it there will be one or more of these: subjID/dMRI/T1w"
+
+		elif [ ${imaging_modality} = ASL_original ]
+		then
+			echo
+			echo -e "This path should point to a folder that contains individual folders for each subject. Each subject's folder contains * SUBFOLDERS * named \"resting??_ASL\""
+			echo -e "Example: /MAIN_folder/subfolder01/, and within it there will be one or more of these: subjID/resting01_ASL"
+
+		elif [ ${imaging_modality} = ASL_processed ]
+		then
+			echo
+			echo -e "This path should point to a folder that contains individual folders for each subject. Each subject's folder contains * FILES * for the subject"
+			echo -e "Example: /MAIN_folder, and within it there will ASL PROCESSED files"
+		else
+			echo
+			echo -e "*** WARNING *** Could not identify the imaging modality!"
+			echo -e "Please check the calling script code"
+
+			echo
+			echo -en "Press any key to continue "
+			read -n 1 anykey
+		fi
+
+		# While loop for user to enter the folder's path
+		while [ 1 ]
+		do
+			echo -e "\n"
+			echo -en "Please enter here the FULL PATH for ** ${imaging_modality} ** files: "
+			read analysis_mainfolder_user
+
+			echo -e "\n"
+			echo -e "You entered this path:\n${analysis_mainfolder_user}"
+
+			# Checking if the variable is not empty
+			if [ -n "${analysis_mainfolder_user}" ]
+			then # In this case, the variable is not empty
+
+				echo
+				echo -e "These are the folders within it:\n"
+
+				# Making the folders within the "analysis_mainfolder_user" variable to be listed in a numbered list for the user
+				# Establishing tne initial folder numbering
+				count=1
+
+				for item in `ls -d ${analysis_mainfolder_user}/*`
+				do
+					# Getting the file name only into a variable
+					item_nameonly=`echo $item | sed 's!'${analysis_mainfolder_user}/'!!'`
+
+					# Using "printf" instead of echo. This format avoids the problem of numbers like 008 or 009 being interpreted as octal by bash during arithmetic operations.
+					printf "%02d) %b\n" ${count} $item_nameonly
+
+					((count++)) # Adding a unit to the variable "count"
+				done
+
+				# Cleaning the contents of the variable below
+				unset count
+
+				echo -e "\n"
+				echo -en "Do you want to use the path entered? (y/n) "
+				read correct_path
+
+				# Checking user's response
+				if [ $correct_path = y ] || [ $correct_path = Y ]
+				then
+					##### Assigning the path entered by the user to the variable "ANALYSIS_MAINFOLDER_PATH" #####
+					ANALYSIS_MAINFOLDER_PATH=${analysis_mainfolder_user}
+					#############################################################################################
+
+					break
+				else
+					echo -e "\n"
+					echo -en "Please correct the entered path to the main folder "
+
+					sleep 2
+				fi
+			else
+				echo
+				echo -e "This folder is empty - Please use another path OR copy the needed files into this folder!\n"
+
+				echo -en "Returning to the PROCESSING menu "
+
+				sleep 2
+
+				exit
+			fi
+		done
+
+		break
+		;;
+	*)
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+
+		sleep 2
+
+		# Entering a newline with echo here so if the loop goes back up it looks good. If added up, it will have 2 newlines
+		echo
+		;;
+	esac
+done
+}
+
+function path_ANATfiles_processing {
+# This function will allow the user to enter the common path to the anatomical files for all subjects being processed
+
+# MANI OUTPUT: partial path to the anatomical file within the variable "anat_file_folder"
+
+while [ 1 ]
+do
+	# Asking input from the user
+	echo
+	echo -e "### Please choose the path to the folder with the ANATOMICAL files ###"
+	echo -e "1. *** Main \"anat\" folder ***: SUBJS_FOLDERS_PATH/SubjID/anat"
+	echo -e "2. *** \"fsl_anat\" output folder *** WITHIN the subject's main \"anat\" folder: SUBJS_FOLDERS_PATH/SubjID/anat/SubjID_anatfiletype.anat"
+	echo -e "3. *** \"fsl_anat\" output folder *** in a DIFFERENT folder (you will need to enter the path to the folder)"
+
+	echo
+	echo -en "Please enter your choice here: "
+	read path_anat_file_chosen
+
+	# Checking the user's choice
+	if [ -n "${path_anat_file_chosen}" ] # Checking if this variable is not empty
+	then
+		case ${path_anat_file_chosen} in
+		1)
+			echo
+			echo -e "You chose the *** main \"anat\" folder ***"
+
+			echo
+			echo -en "Is this correct?(y/n) "
+			read yesno
+
+			if [ ${yesno} = y ]
+			then
+				# Variable to signal to use the following path for the ANATOMICAL file: ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_file_folder}
+				fslanat_output_path=none
+
+				##### Assigning the path to a variable #####
+				anat_file_folder=anat
+
+				break
+			else
+				echo
+				echo -e "Please correct the option entered "
+
+				sleep 2
+			fi
+			;;
+		2)
+			echo
+			echo -e "You chose the *** \"fsl_anat\" output folder *** WITHIN the subject's main \"anat\" folder"
+
+			echo
+			echo -en "Is this correct?(y/n) "
+			read yesno
+
+			if [ ${yesno} = y ]
+			then
+				# Variable to signal to use the following path for the ANATOMICAL file: ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_file_folder}
+				fslanat_output_path=subj_anat_folder
+
+				##### Assigning the path to a variable #####
+				anat_file_folder=anat/*.anat
+
+				break
+			else
+				echo
+				echo -e "Please correct the option entered "
+
+				sleep 2
+			fi
+			;;
+		3)
+			echo
+			echo -e "You chose the *** \"fsl_anat\" output folder *** in a SEPARATE folder"
+
+			echo
+			echo -en "Please enter here the path where all subjects' \"fsl_anat\" output folders are located: "
+			read fslanat_allfolders_path_user
+
+			echo
+			echo -e "You entered the following path:\n${fslanat_allfolders_path_user}"
+
+			echo
+			echo -e "This is the content of the folder within the entered path:\n`ls -d1 ${fslanat_allfolders_path_user}/* | awk -F/ '{print $NF}'`"
+
+			echo
+			echo -en "Is this correct?(y/n) "
+			read yesno
+
+			if [ ${yesno} = y ]
+			then
+				# Variable to signal to use the following path for the ANATOMICAL file: ${anat_file_folder}
+				fslanat_output_path=separate_folder
+
+				##### Assigning the path to a variable #####
+				anat_file_folder=${fslanat_allfolders_path_user}
+
+				break
+			else
+				echo
+				echo -e "Please correct the option entered "
+
+				sleep 2
+			fi
+			;;
+		*)
+			echo
+			echo -en "No valid option chosen - returning to previous menu "
+
+			sleep 2
+			;;
+		esac
+	fi
+done
+}
+
+#####################################################################################
+##########	FUNCTIONS TO PROCESS COMMANDS IN PARALLEL (MULTI-THREADING) AND OTHER HOUSEKEEPING FUNCTIONS	##########
+function number_processors_RAM_available {
+# This function determines the number of processors and amount of RAM memory available
+
+# Checking if this is a Mac OS X or Linux system
+system_type=`uname -s`
+
+if [ ${system_type} = Darwin ] # If this a Mac OS X system
+then
+	# Gathering how many processors the Mac OS X machine has
+	number_processors=`sysctl hw.logicalcpu | awk '{print $2}'`
+
+	# Checking how much RAM memory is available
+	RAM_memory_bytes=`sysctl -a hw | grep -w memsize: | awk '{print $2}'`
+	RAM_memory_GB=`echo " scale=2; ${RAM_memory_bytes} / 1073741824" | bc` # The number 1073741824 (=2^30) is the constant to convert bytes to GB
+	RAM_per_processor=`echo " scale=2; ${RAM_memory_GB} / ${number_processors}" | bc`
+
+elif [ ${system_type} = Linux ] # If this is a Linux system
+then
+	# Gathering how many processors the Linux machine has
+	number_processors=`cat /proc/cpuinfo | grep 'cpu cores' | uniq | awk '{print $4}'`
+
+	# Checking how much RAM memory is available
+	RAM_memory_bytes=`free -b | grep -w Mem: | awk '{print $2}'`
+	RAM_memory_GB=`echo " scale=2; ${RAM_memory_bytes} / 1073741824" | bc` # The number 1073741824 (=2^30) is the constant to convert bytes to GB
+	RAM_per_processor=`echo " scale=2; ${RAM_memory_GB} / ${number_processors}" | bc`
+
+else
+	echo -e "Tried to determined the number of processors and available RAM memory for this computer"
+	echo -e "The operational system is not either Mac OS X or LINUX - this script can only determine the number of processors and available RAM memory in such OSes\n"
+
+	echo -en "Press any key to continue "
+	read -n1 anykey
+fi
+
+# Giving info about this machine to the user and asking how many processors he wishes to use
+echo
+echo -e "\n#####################################################################################################"
+echo -e "PPSS is a script that allows parallel processing, optimizing processor usage in multi-core computers"
+echo -e "Gathering information on processor loading before parallel processing using PPSS"
+
+echo
+echo -e "*** Especifications for this machine ***"
+echo -e "Logical processors available: ${number_processors}"
+echo -e "Total RAM memory available (in GB): ${RAM_memory_GB}"
+echo -e "RAM memory available per processor: ${RAM_per_processor} GB/processor"
+
+# Loop for user's input
+while [ 1 ]
+do
+	echo
+	echo -en "How many processors you want to use (1 - ${number_processors}; press enter for default(=${number_processors})): "
+	read number_processors_to_use_user
+
+	# Checking if this a valid number
+	if [ -n "${number_processors_to_use_user}" ] && [ ${number_processors_to_use_user} -gt 0 ] && [ ${number_processors_to_use_user} -le ${number_processors} ]
+	then
+		# Assigning the value entered by the user to the final variable
+		number_processors_to_use=${number_processors_to_use_user}
+
+		break
+
+	elif [ -z "${number_processors_to_use_user}" ]
+	then
+		# Assigning the value entered by the user to the final variable
+		number_processors_to_use=${number_processors}
+
+		break
+	else
+		# Giving feedback to the user
+		echo
+		echo -e "*** WARNING *** Value entered is invalid"
+		echo -en "Please enter a valid number between 1 - ${number_processors} "
+
+		sleep 2
+	fi
+done
+}
+
+function parallel_processing_ppss {
+# This function will use PPSS to parallelize processing. It only works with ppss version 2.85 - tried to use it with version 2.97 and it fails (08/13/2012)
+# Also, it needs a special command issue for it to work, by using an additional "-c" parameter (see usage below with use of 2 "-c" parameters) - hint given by a PPSS user at the PPSS website (Issue #31 in the issues list <http://code.google.com/p/ppss/issues/list>)
+
+# Since this function will be called by different scripts, the ppss command will always use the parameter "-c 'bash -c $ITEM'". The reason for this is that a script may need to run "feat" while another may need "fsl_motion_outliers". So in order for this function to have universal usage, the file containing the command to be run should include its specific program, and the present function will call a bash shell to run that command for the script. See usage for PPSS in case of doubts - type "ppss" in the command line.
+
+# It uses 4 parameters:
+	# 1) path to the folder holding the temporary files for the script that called this function;
+	# 2) the name of the files holding the commands for PPSS to run.
+	# 3) If the PPSS log files are to deleted by the calling script or here.
+	# 4) If you want to choose within the script calling this function the number of processors to use (in case this function is within a loop, so the user does not need to enter every loop how many processors to use)
+# 	A fifth parameter may be used:
+	# 5) list of unique identifiers for differentiating files containing commands, e.g. a list of subjects
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+
+local script_temp_folder="$1" # Path to the folder holding the temporary files for the script that called this function
+local ppss_command_file="$2" # File with the commands for PPSS processing
+local remove_log="$3" # To indicate if the PPSS log files should be deleted here or by the calling script. Possible values are "calling_script" (delete by the calling script) or "ppss_function" (delete by this function)
+local number_processes="$4"
+local uniqueID_command_list="$5" # If used, this variable will be used in this manner: ${script_temp_folder}/${ppss_command_file}_${item}, where "item" is a individual value from the list contained in the variable "uniqueID_command_list". Note the underscore before the last variable, which will be defined in the script calling this function
+
+# Checking the OS system to see if it is a local computer or the UNC computing cluster to proceed with the proper command
+# Uses the variable "MACHINE_LOCALorREMOTE" create as part of the function "machine_local-network" in "mainscrcall_funclib"
+if [ -n "${MACHINE_LOCALorREMOTE}" ] && [[ ${MACHINE_LOCALorREMOTE} = local ]] # The double square brackets prevents word splitting of variable values; also prevents pathname expansion
+then
+	# Checking if the calling script determined the number of processors to be used. If not, calls the function "number_processors_RAM_available" to allow the user to choose
+	if [ -n "${number_processes}" ] # Checking if this variable is empty
+	then
+		# Since the variable is not empty, it will use the number of processes indicated by it
+		number_processors_to_use=${number_processes}
+	else
+		# Since the variable is empty, allowing the user to choose how many processes to use by PPSS
+		# FUNCTION CALL: calling the function "number_processors_RAM_available" to determine how many processors to be used and amount of RAM memory available
+		number_processors_RAM_available
+	fi
+
+	echo -e "\n"
+	echo -e "Start processing...\n"
+
+	# This will use the PPSS command, using all available processing cores or as many chosen by the user and also hyper-threading if available
+
+	# Entering the /tmp directory just in case any errors occur, it will not mess up the filesystem
+	cd /tmp
+
+	# Removing all PPSS log files that might be present
+	rm -r $PPSS_DIR/* 2> /dev/null
+
+	# Checking if there is a list of unique identifiers or not
+	if [ -z "${uniqueID_command_list}" ] # In case there ARE NO unique identifiers
+	then
+		# This will effectivelly run the PPSS command - note that $ITEM is used instead of $SUBJ, since this is how the PPSS command retrieves the items from the input text file. Observe the use of 2 "-c" parameters in order for it to work - hint given by a PPSS user at the PPSS website (Issue #31 in the issues list <http://code.google.com/p/ppss/issues/list>)
+		if [ -z "${number_processors_to_use}" ]
+		then
+			echo
+			ppss -f ${script_temp_folder}/${ppss_command_file} -c 'bash -c "$ITEM"'
+		else
+			echo
+			ppss -p ${number_processors_to_use} -f ${script_temp_folder}/${ppss_command_file} -c 'bash -c "$ITEM"'
+		fi
+	else # In case there ARE unique identifiers
+		# Looping through all items within the list of unique identifiers
+		for item in ${uniqueID_command_list}
+		do
+			# This will effectivelly run the PPSS command - note that $ITEM is used instead of $SUBJ, since this is how the PPSS command retrieves the items from the input text file. Observe the use of 2 "-c" parameters in order for it to work - hint given by a PPSS user at the PPSS website (Issue #31 in the issues list <http://code.google.com/p/ppss/issues/list>)
+			if [ -z "${number_processors_to_use}" ]
+			then
+				echo
+				echo -e "Processing files for \"${item}\""
+				echo
+				ppss -f ${script_temp_folder}/${ppss_command_file}_${item} -c 'bash -c "$ITEM"'
+			else
+				echo
+				echo -e "Processing files for \"${item}\""
+				echo
+				ppss -p ${number_processors_to_use} -f ${script_temp_folder}/${ppss_command_file}_${item} -c 'bash -c "$ITEM"'
+			fi
+		done
+	fi
+
+	cd /tmp
+
+	# Checking if the calling script will delete the PPSS log files, or if they should be deleted here
+	if [ "${remove_log}" = ppss_function ]
+	then
+		echo -e "\n"
+		echo -e "\tIf you want to look at the log files for the PPSS command, please do so before continuing to the main menu\n"
+		echo -e "\tOtherwise, all log files will be erased as soon as you press any key to continue\n"
+
+		# Just so the user can look up all the processes done before going back to the main menu
+		echo -en "Press any key to continue "
+		read -n1 continue
+
+		# Removing all PPSS log files after user input
+		rm -r $PPSS_DIR/*
+	fi
+
+elif [ -n "${MACHINE_LOCALorREMOTE}" ] && [[ ${MACHINE_LOCALorREMOTE} = remote ]] # The double square brackets prevents word splitting of variable values; also prevents pathname expansion
+then
+	# Checking if running in the U of M supercomputer or UNC computing clusters
+	if [ ${homefolder_username} = moanae ] # User name for U of M supercomputer
+	then
+		################################
+		##### U of M supercomputer #####
+		################################
+
+		function pbs_script {
+		# This function will create the PBS script tp run the commands for analyses
+		# It uses 1 parameter:
+		# 1) Type of PBS script to be built: 1 = multiple; 2 = single
+		# Example of funtion call: pbs_script single
+		local multiple_single_PBSscript="$1" # This flag will signal if all processes are going to be run with a single script per process or all processes in a single script
+		
+		# Checking if the PBS script is going to be multiple or single
+		if [ ${multiple_single_PBSscript} = 1 ] # Multiple PBS scripts
+		then
+			PBSscript_name=script_qsub.pbs
+		
+		elif [ ${multiple_single_PBSscript} = 2 ] # Single PBS script
+		then
+			PBSscript_name=single_script_qsub.pbs
+		fi
+
+		#########################################################################
+		# Creating the PBS script file to be used with the "qsub" command
+		# Creating the empty file
+		> ${script_temp_folder_homedir}/${PBSscript_name}
+		
+		# Initial line of the script with she-bang
+		echo -e "#!/bin/bash -l" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		
+		# Request the queue
+		if [ ${queue_name} = small ]
+		then
+			echo -e "#PBS -q small" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			
+		elif [ ${queue_name} = large ]
+		then
+			echo -e "#PBS -q large" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			
+		elif [ ${queue_name} = widest ]
+		then
+			echo -e "#PBS -q widest" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			
+		elif [ ${queue_name} = ram256g ]
+		then
+			echo -e "#PBS -q ram256g" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			
+		elif [ ${queue_name} = ram1t ]
+		then
+			echo -e "#PBS -q ram1t" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			
+		elif [ ${queue_name} = k40 ]
+		then
+			echo -e "#PBS -q k40" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		else
+			echo
+			echo -e "*** The queue name entered does not exist ***"
+			echo -e "Please re-start this process and correct it"
+			echo -e "Exiting this script "
+			
+			sleep 2
+			
+			exit
+		fi
+		
+		# Resource request
+		echo -e "#PBS -l walltime=${wallclock_limit},nodes=${nodes_num}:ppn=${cpu_number},pmem=${memory_perprocess}mb" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		
+		# Makes the PBS system send message emails when the job aborts, begins, or ends
+		echo -e "#PBS -m abe" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		
+		# Specifies the email address that should be used when the PBS system sends message emails
+		echo -e "#PBS -M ${email_address}" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		
+		# Directs the job standard output to be placed in the named file
+		echo -e "#PBS -o ${output_qsub_folder}" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		
+		# Directs the job error output to be placed in the named file
+		echo -e "#PBS -e ${output_qsub_folder}" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		
+		# Variables holding modules to load
+		# Loading FSL 5.0.8_gcc4.9.2 as recommended by MSI admin
+		echo "module load fsl/5.0.8_gcc4.9.2" >> ${script_temp_folder_homedir}/${PBSscript_name}
+
+		# Loading Freesurfer 5.3.0
+		echo "module load freesurfer/5.3.0" >> ${script_temp_folder_homedir}/${PBSscript_name}
+
+		# Adding specific commands for PBS script to run parallel processes in multi-core, multi-node
+		if [ ${multiple_single_PBSscript} = 1 ] # Multiple PBS scripts
+		then
+			# Changing the *** FIELD SEPARATOR *** from space to new line
+			# First saving the original IFS variable
+			OLD_IFS=$IFS
+
+			# Now changing FIELD SEPARATOR to new line
+			IFS=$'\n'
+
+			# Establishing the initial numbering
+			count=1
+			
+			#### Adding the jobs to the PBS script and submission using the "qsub" command ####
+			for item in `cat ${script_temp_folder_homedir}/${ppss_command_file}`
+			do
+				# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+				counter=`printf "%04d" ${count}`
+
+				# Making a copy of the created PBS script template so it has an unique name
+				cp ${script_temp_folder_homedir}/${PBSscript_name} ${script_temp_folder_homedir}/${counter}_${PBSscript_name}
+				
+				# Adding the job to the PBS script
+				echo "${item}" >> ${script_temp_folder_homedir}/${counter}_${PBSscript_name}
+				
+				# Adding a unit to the numbering variable
+				((count++))
+			done
+			
+			# Removing the PBS script template
+			rm ${script_temp_folder_homedir}/${PBSscript_name}
+			
+			# Changing the *** FIELD SEPARATOR *** back to the default
+			IFS=$OLD_IFS
+			##################################
+			
+		elif [ ${multiple_single_PBSscript} = 2 ] # Single PBS script
+		then
+			# Loading GNU parallel for multi-core, multi-node automatic parallelization
+			echo "module load parallel" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			
+			# From the MSI FAQ page: Multi-node jobs are a little tricky because the remote nodes do not inherit the environment from the head node, so any modules loaded by the pbs script won’t be present on the remote nodes. One workaround is to include this environment variable defenition in your PBS script after you have loaded your modules, but before you run GNU Parallel: (the escaping of the quotes was introduced manually by me, as in the FAQ page this was a command entered in the command line, instead of echoing into a script)
+			# echo "export PARALLEL=\"--workdir . --env PATH --env LD_LIBRARY_PATH --env LOADEDMODULES --env _LMFILES_ --env MODULE_VERSION --env MODULEPATH --env MODULEVERSION_STACK --env MODULESHOME --env OMP_DYNAMICS --env OMP_MAX_ACTIVE_LEVELS --env OMP_NESTED --env OMP_NUM_THREADS --env OMP_SCHEDULE --env OMP_STACKSIZE --env OMP_THREAD_LIMIT --env OMP_WAIT_POLICY\"" >> ${script_temp_folder_homedir}/${PBSscript_name}
+
+			# Loading the nodes allocated to the job assigned to the submitted PBS script. from the MSI FAQ page: The PBS environment variable PBS_NODEFILE points to a file that lists all nodes allocated to the current job, however each node is listed once for each core on the node. Therefore you need to either tell GNU Parallel to run one job per node, or remove duplicate node names from the node file.
+			echo "sort -u \$PBS_NODEFILE > ${output_qsub_folder}/unique-nodelist.txt" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			
+			# Adding the variable below to export all environmental variables to parallel, so it can use in the children shels it will open
+			echo "export PARALLEL=\"--env PATH --env LD_LIBRARY_PATH --env LOADEDMODULES --env _LMFILES_ --env MODULE_VERSION --env MODULEPATH --env MODULEVERSION_STACK --env MODULESHOME --env OMP_DYNAMICS --env OMP_MAX_ACTIVE_LEVELS --env OMP_NESTED --env OMP_NUM_THREADS --env OMP_SCHEDULE --env OMP_STACKSIZE --env OMP_THREAD_LIMIT --env OMP_WAIT_POLICY --env FSLDIR --env FSLOUTPUTTYPE --env FSLMULTIFILEQUIT --env FSLTCLSH --env FSLWISH --env FSLLOCKDIR --env FSLMACHINELIST --env FSLREMOTECALL --env FSLGECUDAQ --env FSLCONFDIR --env FSLMACHTYPE\"" >> ${script_temp_folder_homedir}/${PBSscript_name}
+			#########################################################################
+			
+			# Last entry to the PBS script to call parallel to run with its command file created above (note the escaped variable $PBS_NODEFILE)
+			echo "parallel --sshloginfile ${output_qsub_folder}/unique-nodelist.txt --workdir ${output_qsub_folder} -a ${script_temp_folder_homedir}/${ppss_command_file}" >> ${script_temp_folder_homedir}/${PBSscript_name}
+		fi
+		}
+		
+		function temp_folder {
+			# Creating a variable with current time to stamp mark the text file holding the variables. Notice the call for function "current_date_time" from mainscrcall_funclib, to output the date and time. Using parameter "1" so there are no spaces.
+			var_text_date=`current_date_time 1`
+			
+			# Variable holding the new temp folder and the output_bsub folder
+			script_temp_folder_homedir=${HOME}/temp_files/temp_files_${var_text_date}
+			output_qsub_folder=${HOME}/output_qsub/output_qsub_${var_text_date}
+			
+			# Creating the temp folder
+			mkdir -p ${script_temp_folder_homedir} 2> /dev/null
+			mkdir -p ${output_qsub_folder} 2> /dev/null
+		}
+		
+		echo
+		echo -e "Processing this using U of M supercomputer"
+		
+		while [ 1 ]
+		do
+			# Asking the user if processing is to be done with one PBS script per process or with a single PBS script for all processes
+			echo
+			echo -en "Do you want process (1) each job in its own PBS script or (2) all jobs in a single PBS script? "
+			read pbsscript_single_multiple
+			
+			if [ ${pbsscript_single_multiple} = 1 ]
+			then
+				# Giving feedback to the user
+				echo
+				echo -e "Processing each job in its own PBS script"
+			
+				#########################################################################
+				########## SUBMITTING A SINGLE PBS SCRIPT PER JOB ##########
+				function qsub_default_options {
+				# DEFAULT options for PBS script to be used with "qsub" command. Mesabi is the default supercomputer cluster since mid-2015
+				nodes_num="1" # Number of nodes to be used
+				cpu_number="24" # Number of cores per node
+				memory_perprocess="2580" # Job memory limit
+				wallclock_limit="24:00:00" # Wallclock limit
+				email_address="moana004@umn.edu" #email addresss to receive messages
+				queue_name=mesabi # Queue name to be used (The mesabi queue is a meta-queue, which will automatically route jobs to the small, large, widest, or max queues, according to where each job will best fit based on the resource request)
+				}
+
+				# FUNCTION CALL: calling "qsub_default_options" to establish the default options for the bsub command
+				qsub_default_options
+
+				while [ 1 ]
+				do
+					# Giving the option to the user for him modify the DEFAULT parameters set above
+					echo
+					echo -e "These are the DEFAULT options for the PBS script to be used with the \"qsub\" command:"
+					echo -e "# of nodes to be used = ${nodes_num}"
+					echo -e "# of processors per node = ${cpu_number}"
+					echo -e "Per-core memory limit in MB = ${memory_perprocess}"
+					echo -e "Maximum processing time in hours (hh:mm:ss) = ${wallclock_limit}"
+					echo -e "Email address for messages from supercomputer = ${email_address}"
+					echo -e "Queue name to be used (\"mesabi\" mesabi queue is a meta-queue, which will automatically route jobs to the small, large, widest, or max queues) = ${queue_name}"
+
+					echo
+					echo -en "Do you want to (1) keep or (2) change any of the above parameters? "
+					read param_change_option
+
+					# Checking the user's option
+					if [ -n "${param_change_option}" ] && [ ${param_change_option} = 2 ]
+					then
+						echo
+						echo -en "Enter # of nodes (enter number only) (press ENTER to keep default value): "
+						read nodes_num_user
+					
+						echo
+						echo -en "Enter # of processors (enter number only) (press ENTER to keep default value): "
+						read cpu_number_user
+
+						echo
+						echo -en "Enter per-core memory limit in MB (enter number) (press ENTER to keep default value): "
+						read memory_perprocess_user
+
+						echo
+						echo -en "Enter maximum processing time in hours (format=hh:mm:ss) (press ENTER to keep default value): "
+						read wallclock_limit_user
+						
+						echo
+						echo -en "Enter email address  (press ENTER to keep default value): "
+						read email_address_user
+
+						echo
+						echo -en "Enter queue name to be used (For Mesabi cluster: \"small\", \"large\", \"widest\", \"ram256\", \"ram1t\", \"k40\") (press ENTER to keep default value): "
+						read queue_name_user
+						
+						# Checking if the variables have content, and changing their values if so
+						if [ -n "${nodes_num_user}" ]
+						then
+							nodes_num="${nodes_num_user}"
+						fi
+						
+						if [ -n "${cpu_number_user}" ]
+						then
+							cpu_number="${cpu_number_user}"
+						fi
+						
+						if [ -n "${memory_perprocess_user}" ]
+						then
+							memory_perprocess="${memory_perprocess_user}"
+						fi
+						
+						if [ -n "${wallclock_limit_user}" ]
+						then
+							wallclock_limit="${wallclock_limit_user}"
+						fi
+						
+						if [ -n "${email_address_user}" ]
+						then
+							email_address="${email_address_user}"
+						fi
+						
+						if [ -n "${queue_name_user}" ]
+						then
+							queue_name="${queue_name_user}"
+						fi
+
+						# Showing the entered options back to the user
+						echo
+						echo -e "These are the CURRENT options for the PBS script to be used for the \"qsub\" command:"
+						echo -e "# of nodes to be used = ${nodes_num}"
+						echo -e "# of cores per node = ${cpu_number}"
+						echo -e "Per-core memory limit in MB = ${memory_perprocess}"
+						echo -e "maximum processing time in hours (hh:mm:ss) = ${wallclock_limit}"
+						echo -e "Email address for messages from supercomputer = ${email_address}"
+						echo -e "Queue name to be used = ${queue_name}"
+
+						echo
+						echo -en "Press (1) to use these values, or (2) to use the DEFAULT values: "
+						read param_tobeused
+
+						if [ -n "${param_tobeused}" ] && [ ${param_tobeused} = 1 ]
+						then
+							echo
+							echo -en "Using the entered values "
+
+							sleep 1
+
+							break
+
+						elif [ -n "${param_tobeused}" ] && [ ${param_tobeused} = 2 ]
+						then
+							echo
+							echo -en "Using the DEFAULT values "
+
+							# FUNCTION CALL: calling "bsub_default_options" to establish the default options for the bsub command
+							qsub_default_options
+
+							sleep 1
+
+							break
+						else
+							echo
+							echo -e "No valid option entered. Please enter ONLY (1) or (2)"
+							echo -en "Returning to the menu above "
+
+							sleep 1
+						fi
+
+					elif [ -n "${param_change_option}" ] && [ ${param_change_option} = 1 ]
+					then
+						echo
+						echo -en "Using the DEFAULT values "
+
+						sleep 1
+
+						break
+					else
+						echo
+						echo -e "No valid option entered. Please enter ONLY \"y\" or \"n\""
+						echo -en "Returning to the menu above "
+
+						sleep 1
+					fi
+				done
+
+				# FUNCTION CALL: Calls the function "temp_folder" in "mainscrcall_funclib" to create "temp_files" and "output_qsub" subfolders
+				temp_folder
+
+				# Giving feedback to the user
+				echo
+				echo -en "Moving the temp files to the folder: ${script_temp_folder_homedir}"
+
+				# Moving all files from "/tmp" to the home directory as each node has its own "/tmp" thus the processing node will likely not have the necessary files in its "/tmp" folder
+				mv ${script_temp_folder}/* ${script_temp_folder_homedir}/
+
+				##################################
+				echo
+				echo -en "### Submitting the jobs to the U of M supercomputer using the \"qsub\" command ### "
+				
+				# FUNCTION CALL: Calls the function "pbs_script" in "mainscrcall_funclib" to create the PBS script for processing
+				pbs_script ${pbsscript_single_multiple}
+				
+				# Issuing the "qsub" command for each file to be processed
+				qsub ${script_temp_folder_homedir}/${PBSscript_name}
+
+				break
+				
+			elif [ ${pbsscript_single_multiple} = 2 ]
+			then
+				# Giving feedback to the user
+				echo
+				echo -e "Processing all jobs in single PBS script"
+			
+				#########################################################################
+				########## SUBMITTING A SINGLE PBS SCRIPT FOR ALL JOBS ##########
+				function qsub_default_options {
+				# DEFAULT options for PBS script to be used with "qsub" command. Mesabi is the default supercomputer cluster since mid-2015
+				memory_perprocess="2580" # Job memory limit
+				wallclock_limit="24:00:00" # Wallclock limit
+				email_address="moana004@umn.edu" #email addresss to receive messages
+				queue_name=mesabi # Queue name to be used (The mesabi queue is a meta-queue, which will automatically route jobs to the small, large, widest, or max queues, according to where each job will best fit based on the resource request)
+				}
+		
+				# FUNCTION CALL: calling "qsub_default_options" to establish the default options for the bsub command
+				qsub_default_options
+		
+				while [ 1 ]
+				do
+					# Giving the option to the user for him modify the DEFAULT parameters set above
+					echo
+					echo -e "These are the DEFAULT options for the PBS script to be used with the \"qsub\" command:"
+					echo -e "# of nodes to be used = *** Will be determined by the number of jobs to be processed ***"
+					echo -e "# of cores per node = *** Will be determined by the number of jobs to be processed ***"
+					echo -e "Per-core memory limit in MB = ${memory_perprocess}"
+					echo -e "Maximum processing time in hours (hh:mm:ss) = ${wallclock_limit}"
+					echo -e "Email address for messages from supercomputer = ${email_address}"
+					echo -e "Queue name to be used = *** Will be determined by the number of jobs to be processed ***"
+		
+					echo
+					echo -en "Do you want to (1) keep or (2) change any of the above parameters? "
+					read param_change_option
+		
+					# Checking the user's option
+					if [ -n "${param_change_option}" ] && [ ${param_change_option} = 2 ]
+					then
+						echo
+						echo -en "Enter per-core memory limit in MB (enter number) (press ENTER to keep default value): "
+						read memory_perprocess_user
+		
+						echo
+						echo -en "Enter maximum processing time in hours (format=hh:mm:ss) (press ENTER to keep default value): "
+						read wallclock_limit_user
+						
+						echo
+						echo -en "Enter email address (press ENTER to keep default value): "
+						read email_address_user
+
+						# Checking if the variables have content, and changing their values if so
+						if [ -n "${cpu_number_user}" ]
+						then
+							cpu_number="${cpu_number_user}"
+						fi
+						
+						if [ -n "${memory_perprocess_user}" ]
+						then
+							memory_perprocess="${memory_perprocess_user}"
+						fi
+						
+						if [ -n "${wallclock_limit_user}" ]
+						then
+							wallclock_limit="${wallclock_limit_user}"
+						fi
+						
+						if [ -n "${email_address_user}" ]
+						then
+							email_address="${email_address_user}"
+						fi
+		
+						# Showing the entered options back to the user
+						echo
+						echo -e "These are the CURRENT options for the PBS script to be used for the \"qsub\" command:"
+						echo -e "Per-core memory limit in MB = ${memory_perprocess}"
+						echo -e "maximum processing time in hours (hh:mm:ss) = ${wallclock_limit}"
+						echo -e "Email address for messages from supercomputer = ${email_address}"
+		
+						echo
+						echo -en "Press (1) to use these values, or (2) to use the DEFAULT values: "
+						read param_tobeused
+		
+						if [ -n "${param_tobeused}" ] && [ ${param_tobeused} = 1 ]
+						then
+							echo
+							echo -en "Using the entered values "
+		
+							sleep 1
+		
+							break
+		
+						elif [ -n "${param_tobeused}" ] && [ ${param_tobeused} = 2 ]
+						then
+							echo
+							echo -en "Using the DEFAULT values "
+		
+							# FUNCTION CALL: calling "qsub_default_options" to establish the default options for the bsub command
+							qsub_default_options
+		
+							sleep 1
+		
+							break
+						else
+							echo
+							echo -e "No valid option entered. Please enter ONLY (1) or (2)"
+							echo -en "Returning to the menu above "
+		
+							sleep 1
+						fi
+		
+					elif [ -n "${param_change_option}" ] && [ ${param_change_option} = 1 ]
+					then
+						echo
+						echo -en "Using the DEFAULT values "
+		
+						sleep 1
+		
+						break
+					else
+						echo
+						echo -e "No valid option entered. Please enter ONLY \"y\" or \"n\""
+						echo -en "Returning to the menu above "
+		
+						sleep 1
+					fi
+				done
+		
+				# FUNCTION CALL: Calls the function "temp_folder" in "mainscrcall_funclib" to create "temp_files" and "output_qsub" subfolders
+				temp_folder
+
+				# Giving feedback to the user
+				echo
+				echo -en "Moving the temp files to the folder: ${script_temp_folder_homedir}"
+
+				# Moving all files from "/tmp" to the home directory as each node has its own "/tmp" thus the processing node will likely not have the necessary files in its "/tmp" folder
+				mv ${script_temp_folder}/* ${script_temp_folder_homedir}/
+				
+				##################################
+				# Changing the *** FIELD SEPARATOR *** from space to new line
+				# First saving the original IFS variable
+				OLD_IFS=$IFS
+		
+				# Now changing FIELD SEPARATOR to new line
+				IFS=$'\n'
+		
+				##### Counts the number of processes to calculate how many jobs will be executed with the single PBS script #####
+				# Establishing the initial numbering
+				count=0
+				
+				# Summing the number of entries in the ppss_command_file
+				for item in `cat ${script_temp_folder_homedir}/${ppss_command_file}`
+				do
+					# Adding a unit to the numbering variable
+					((count++))
+				done
+				
+				# Changing the *** FIELD SEPARATOR *** back to the default
+				IFS=$OLD_IFS
+				##################################
+		
+				# Giving feedback to the user about the number of processes to be done
+				echo
+				echo -e "### Submitting the jobs to the U of M supercomputer using the \"qsub\" command ###"
+				
+				echo
+				echo -e "These are the limits for each queue in the Mesabi cluster:"
+				echo -e "Queue\t\tMax/Min nodes\tCores\tWallclock Limit\tPer-core memory"
+				echo -e "small\t\t9/none\t\t24\t96 hrs\t\t2580mb"
+				echo -e "large\t\t48/10\t\t24\t24 hrs\t\t2580mb"
+				echo -e "widest\t\t360/49\t\t24\t24 hrs\t\t2580mb"
+				echo -e "ram256g\t\t2/none\t\t24\t96 hrs\t\t10580mb"
+				echo -e "k40\t\t40/none\t\t24\t24 hrs\t\t5290mb"
+		
+				# Calculating the number of nodes and cores needed based on the number of entries in the "ppss_command_file"
+				# This is relative to the queue being used - so it needs to know that
+				# Mesabi queues "small", "large", "widest", "ram256g", and "k40" have a max of 24 processor cores per node
+				# Variables
+				cores_node=24
+				
+				# First, checking if the number of processes is not less than the number of cores
+				if [ ${count} -lt ${cores_node} ] # If it is less than one, then will use one node only
+				then
+					nodes_num=1
+				else
+					# Checking if the number of processes divide by the number of cores in a node without remainder
+					integer_part=`echo "scale=5; ${count} / ${cores_node}" | bc | awk -F. '{print $1}'`
+					remainder_part=`echo "scale=5; ${count} / ${cores_node}" | bc | awk -F. '{print $2}'`
+					
+					if [ ${remainder_part} -ne 00000 ] # Checks if remainder is not equal to 00000
+					then
+						# Needs to add one unit to the number of nodes to accomodate the uneven number of processes
+						nodes_num=`echo "${integer_part} + 1" | bc`
+					else
+						# Checking if the integer is not empty (the case when is < 1)
+						if [ -n "${nodes_num}" ]
+						then
+							# Number of processess is even to the number of cores per node
+							nodes_num=${integer_part}
+						else
+							# Needs to add one unit to the number of nodes as the division is less than 1
+							nodes_num=1
+						fi
+					fi
+				fi
+
+				# Giving feedback to the user
+				echo
+				echo -e "###############################"
+				echo -e "Total processes to be run: ${count}"
+				echo -e "Number of nodes needed: ${nodes_num}"
+				echo -e "###############################"
+				
+				while [ 1 ]
+				do
+					# Checking if the user wants to use the total number of processors available or only the number of processes to be run (queue large, widest, and k40 do not allow node sharing thus need to request all processors regardless)
+					echo
+					echo -e "Now enter the # of processors to be requested"
+					echo -e "*** Remember that the queues large, widest, and k40 do not allow node sharing thus need to request all processors (=${cores_node}) ***"
+					echo -e "*** If requesting more than one node, you should always enter the max number of processors ***"
+					echo -en "Enter # of processors (enter number only) (press ENTER to keep default value (=${cores_node}): "
+					read cpu_number_user
+					
+					if [ -n "${cpu_number_user}" ] # Checks if this variable is empty
+					then
+						cpu_number="${cpu_number_user}"
+					else
+						cpu_number=${cores_node}
+					fi
+					
+					# Showing the entered options back to the user
+					echo
+					echo -e "# of processors per node entered = ${cpu_number}"
+					
+					echo
+					echo -en "Is this correct? (y/n) "
+					read yesno
+
+					if [ -n "${yesno}" ] && [ ${yesno} = y ]
+					then
+						break
+					else
+						echo
+						echo -en "Please re-enter the # of processors per node "
+
+						sleep 2
+					fi		
+				done
+				
+				# Checking if the number of nodes needed exceeds the max number of nodes in each queue
+				if [ ${nodes_num} -gt 2 ]
+				then
+					echo
+					echo -en "*** The amount of nodes requested exceeds max allowed for queue \"ram256g\" ***"
+					
+					sleep 2
+				fi
+				
+				if [ ${nodes_num} -gt 9 ]
+				then
+					echo
+					echo -en "*** The amount of nodes requested exceeds max allowed for queues \"small\" ***"
+					
+					sleep 2
+				fi
+				
+				if [ ${nodes_num} -gt 48 ]
+				then
+					echo
+					echo -en "*** The amount of nodes requested exceeds max allowed for queue \"large\" ***"
+					
+					sleep 2
+				fi
+				
+				if [ ${nodes_num} -gt 40 ]
+				then
+					echo
+					echo
+					echo -en "*** The amount of nodes requested exceeds max allowed for queue \"k40\" ***"
+					
+					sleep 2
+				fi
+				
+				if [ ${nodes_num} -gt 360 ]
+				then
+					echo
+					echo
+					echo -en "The amount of nodes requested exceeds max allowed for queue \"widest\""
+					
+					sleep 2
+				fi
+
+				while [ 1 ] 
+				do
+					echo
+					echo -en "Enter queue name to be used according to the info above (For Mesabi cluster: \"small\", \"large\", \"widest\", \"ram256g\", \"ram1t\", \"k40\"): "
+					read queue_name_user
+					
+					echo
+					echo -e "You choose queue: ${queue_name_user}"
+					echo -en "Is this correct?(y/n) "
+					read yesno
+
+					if [ ${yesno} = y ]
+					then
+						queue_name="${queue_name_user}"
+						
+						break
+					else
+						echo
+						echo -en "Please correct the option entered "
+
+						sleep 2
+					fi
+				done
+
+				# FUNCTION CALL: Calls the function "pbs_script" in "mainscrcall_funclib" to create the PBS script for processing, using the variable "pbsscript_single_multiple" to signal it is a single PBS script
+				pbs_script ${pbsscript_single_multiple}
+
+				# Asking if the user wants to call qsub for running the script or not (in case the script needs to be edited manuanlly)
+				while [ 1 ]
+				do
+					echo
+					echo -en "Do you want to (1) submit for processing now or (2) no submission to allow for later script editing? "
+					read process_now_later
+					
+					if [ ${process_now_later} = 1 ]
+					then
+						# Issuing the "qsub" command for each file to be processed
+						qsub ${script_temp_folder_homedir}/single_script_qsub.pbs
+						
+						echo -e "\n"
+						echo -e "All jobs submitted"
+						echo -e "Job submitted has its PBS script file saved as \"script_qsub.pbs\" in this folder: ${script_temp_folder_homedir}"
+						
+						break
+						
+					elif [ ${process_now_later} = 2 ]
+					then
+						echo
+						echo -e "No processing will be done now"
+						echo -e "The PBS script file created was saved as \"script_qsub.pbs\" in this folder: ${script_temp_folder_homedir}"
+						
+						break
+					else
+						echo
+						echo -en "Option entered is not valid. Please choose \"1\" or \"2\" "
+						
+						sleep 2
+					fi
+				done
+		
+				echo
+				echo -en "Press anykey to go back to the main menu "
+				read -n1 continue
+				
+			else
+				echo
+				echo -en "Invalid option chosen - please re-enter option "
+				
+				sleep 2
+			fi
+			
+			break
+		done
+# 	else 
+# 		# In this case, it assumes it will use the UNC computing clusters
+# 		
+# 		##################################
+# 		##### UNC computing clusters #####
+# 		##################################
+# 		echo
+# 		echo -e "Processing this using UNC computing cluster"
+# 
+# 		function bsub_default_options {
+# 		# DEFAULT option for "bsub" command
+# 		cpu_number="-n 1" # Number of CPUs to be used by the job
+# 		memory_perprocess="-M 8" # Memory limit for the job submitted
+# 		output_folder="-o output_%J.txt" # path and file name for the output generated (instead of sending by email)
+# 		}
+# 
+# 		# FUNCTION CALL: calling "bsub_default_options" to establish the default options for the bsub command
+# 		bsub_default_options
+# 
+# 		while [ 1 ]
+# 		do
+# 			# Giving the option to the user for him modify the DEFAULT parameters set above
+# 			echo
+# 			echo -e "These are the DEFAULT options to be used for the \"bsub\" command:"
+# 			echo -e "# of CPUs to be used = ${cpu_number}"
+# 			echo -e "Max memory per process = ${memory_perprocess}"
+# 			echo -e "Path and name for output file = ${output_folder}"
+# 
+# 			echo
+# 			echo -en "Do you want to change any of the above parameters? (y/n) "
+# 			read param_change_option
+# 
+# 			# Checking the user's option
+# 			if [ -n "${param_change_option}" ] && [ ${param_change_option} = y ]
+# 			then
+# 				echo
+# 				echo -en "Enter # of CPUs to be used (enter number only, no need for the \"-n\") (press ENTER to keep default value): "
+# 				read cpu_number_user
+# 
+# 				echo
+# 				echo -en "Enter Max memory per process in GB (enter number only, no need for the \"-M\") (press ENTER to keep default value): "
+# 				read memory_perprocess_user
+# 
+# 				echo
+# 				echo -en "Enter Path and name for output file (enter path & name only, no need for the \"-o\") (press ENTER to keep default value): "
+# 				read output_folder_user
+# 
+# 				# Checking if the variables have content, and changing their values if so
+# 				if [ -n "${cpu_number_user}" ]
+# 				then
+# 					cpu_number="-n ${cpu_number_user}"
+# 
+# 				elif [ -n "${memory_perprocess_user}" ]
+# 				then
+# 					memory_perprocess="-M ${memory_perprocess_user}"
+# 
+# 				elif [ -n "${output_folder_user}" ]
+# 				then
+# 					output_folder="-o ${output_folder_user}"
+# 				fi
+# 
+# 				# Showing the entered options back to the user
+# 				echo
+# 				echo -e "These are the CURRENT options to be used for the \"bsub\" command:"
+# 				echo -e "# of CPUs to be used = ${cpu_number}"
+# 				echo -e "Max memory per process = ${memory_perprocess}"
+# 				echo -e "Path and name for output file = ${output_folder}"
+# 
+# 				echo
+# 				echo -en "Press (1) to use these values, or (2) to use the DEFAULT values: "
+# 				read param_tobeused
+# 
+# 				if [ -n "${param_tobeused}" ] && [ ${param_tobeused} = 1 ]
+# 				then
+# 					echo
+# 					echo -en "Using the entered values "
+# 
+# 					sleep 2
+# 
+# 					break
+# 
+# 				elif [ -n "${param_tobeused}" ] && [ ${param_tobeused} = 2 ]
+# 				then
+# 					echo
+# 					echo -en "Using the DEFAULT values "
+# 
+# 					# FUNCTION CALL: calling "bsub_default_options" to establish the default options for the bsub command
+# 					bsub_default_options
+# 
+# 					sleep 1
+# 
+# 					break
+# 
+# 				else
+# 					echo
+# 					echo -e "No valid option entered. Please enter ONLY (1) or (2)"
+# 					echo -en "Returning to the menu above "
+# 
+# 					sleep 1
+# 				fi
+# 
+# 			elif [ -n "${param_change_option}" ] && [ ${param_change_option} = n ]
+# 			then
+# 				echo
+# 				echo -en "Using the DEFAULT values "
+# 
+# 				sleep 1
+# 
+# 				break
+# 			else
+# 				echo
+# 				echo -e "No valid option entered. Please enter ONLY \"y\" or \"n\""
+# 				echo -en "Returning to the menu above "
+# 
+# 				sleep 1
+# 			fi
+# 		done
+# 
+# 		# Variable holding the new temp folder and the output_bsub folder
+# 		local script_temp_folder_homedir=${HOME}/temp_files
+# 		local output_bsub_folder=${HOME}/output_bsub
+# 
+# 		# Removing the temp folder
+# 		rm -rf ${script_temp_folder_homedir} 2> /dev/null
+# 		rm -rf ${output_bsub_folder} 2> /dev/null
+# 
+# 		# Creating the temp folder
+# 		mkdir -p ${script_temp_folder_homedir} 2> /dev/null
+# 		mkdir -p ${output_bsub_folder} 2> /dev/null
+# 
+# 		# Giving feedback to the user
+# 		echo
+# 		echo -en "Moving the temp files to the folder: ${script_temp_folder_homedir}"
+# 
+# 		# Moving all files from "/tmp" to the home directory as each node has its own "/tmp" thus the processing node will likely not have the necessary files in its "/tmp" folder
+# 		mv ${script_temp_folder}/* ${script_temp_folder_homedir}/
+# 
+# 		echo
+# 		echo -en "### Submitting the jobs to the computing cluster using the \"bsub\" command ###"
+# 		echo -e "\n"
+# 
+# 		# Getting the current date and time to time stamp the file below with output of calling bsub
+# 		file_timestamp=`current_date_time 1`
+# 
+# 		# Going to the "output_bsub" folder within the home folder so all output files are saved there
+# 		cd ${output_bsub_folder}
+# 
+# 		# Changing the *** FIELD SEPARATOR *** from space to new line
+# 		# First saving the original IFS variable
+# 		OLD_IFS=$IFS
+# 
+# 		# Now changing FIELD SEPARATOR to new line
+# 		IFS=$'\n'
+# 
+# 		# Submitting the jobs to "bsub"
+# 		for item in `cat ${script_temp_folder_homedir}/${ppss_command_file}`
+# 		do
+# 			# Changing the path to the files listed from the original temp folder to the modified one for UNC cluster
+# 			item_mod=`echo ${item} | sed 's!'${script_temp_folder}!${script_temp_folder_homedir}'!'`
+# 
+# 			# Issuing the "bsub" command for each file to be processed, and saving the qsub command submitted into a text file
+# 			bsub ${cpu_number} ${memory_perprocess} ${output_folder} ${item_mod} >> ${script_temp_folder_homedir}/output_bsub_command_issuing_${file_timestamp}.txt
+# 		done
+# 
+# 		# Changing the *** FIELD SEPARATOR *** back to the default
+# 		IFS=$OLD_IFS
+# 		#########################################################################
+
+# 		echo -e "The jobs ID are listed in this file: ${script_temp_folder_homedir}/output_bsub_command_issuing_${file_timestamp}.txt"
+# 		echo -e "Output from each job processed will be named \"${output_folder}\" in the working directory: `pwd`"
+# 
+# 		echo -e "\n"
+# 		echo -e "All jobs submitted"
+# 		echo
+# 		echo -en "Press anykey to go back to the main menu "
+# 		read -n1 continue
+
+# 		break
+	fi
+else
+	echo
+	echo -e "Could not determine if this is a local machine or a computing cluster node"
+	echo e- "Please check using the command \"uname -n\" in the command line\n"
+
+	echo -en "Press anykey to exit "
+	read -n1 anykey
+
+	exit
+fi
+}
+
+function parallel_processing_bash {
+# This function will use bash to parallelize processing by calling child processes within bash to run in the background.
+# This is needed in cases such as:
+# 1) *** (nonPPSS mode) *** For commands like "bedpostx" from FSL do not accept being called from PPSS for some reason - it always gives errors
+# 2) *** (serial mode) *** For commands that need to be run in serial sequence, such as the 2-step bet call from the script "bet_skullextract" or getting the maxima and local maxima in order for each subject in the script "cluster_location_awk". THIS CAN ACTUALLY BE DONE IN PPSS, AS LONG AS THE COMMANDS TO BE RUN IN SERIAL MODE ARE SEPARATED BY SEMICOLONS (;)
+	##### The script calling this function should output text files that contains a single line of commands separated by semicolons #####
+
+# It uses 3 parameters:
+	# 1) Path to the folder holding the temporary files for the script that called this function
+	# 2) The basename of the files holding the commands to run.
+	# 3) Establishes if using this function in "serial" or "nonPPSS" mode; thus possibel values are "serial" or "nonPPSS"
+#
+# 	A fourth parameter may be used:
+	# 3) list of unique identifiers for differentiating commands, e.g. a list of subjects
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+
+local script_temp_folder="$1" # Path to the folder holding the temporary files for the script that called this function
+local bash_command_file="$2" # Basename of the file to be used
+local mode_processing="$3"
+local uniqueID_command_list="$4" # If used, this variable will be used in this manner: ${script_temp_folder}/${ppss_command_file}_${item}, where "item" is a individual value from the list contained in the variable "uniqueID_command_list". Note the underscore before the last variable, which will be defined in the script calling this function
+
+# Calling the function "number_processors_RAM_available" to determine how many processors to be used and amount of RAM memory available
+number_processors_RAM_available
+
+# Entering the /tmp directory just in case any errors occur, it will not mess up the filesystem
+cd /tmp
+
+# Defining the variables: 1) "item_processed_partial" that will count the number of processes running in parallel; AND 2) "item_processed_total" to make a global count of how many processes were ran
+item_processed_partial=0
+item_processed_total=0
+
+# Defining if running a command that needs to be run from bash (and not using PPSS) OR a command the needs to be run in serial
+if [ ${mode_processing} = serial ]
+then
+	# Giving the initial processing time
+	echo
+	echo -e "Processing started on: `date`"
+
+	# Listing how MANY ITEMS TO BE PROCESSED into a variable
+	items_to_process=`ls ${script_temp_folder}/${bash_command_file}_* | wc -l`
+
+	# Loop to go through each subject listed in the file entered by the user
+	for item in `ls ${script_temp_folder}/${bash_command_file}_*`
+	do
+		# Exporting the variables in case child processes are called (not sure if it is necessary)
+		export item
+
+		# Getting the subject's name into a variable. Remember the format of the file name "${temp_folder}/${command_file}_${SUBJ}"
+		subjID=`echo $item | sed 's!'${script_temp_folder}/${bash_command_file}_'!!'`
+
+		# Giving feedback to the user
+		echo -e "\n"
+		echo -en "Processing subject \"${subjID}\" "
+
+		commands_to_use=`cat ${item}`
+
+		# This will call the command in the background, allowing to call more than one instance. In reality, this allows for parallel processing using multiple cores
+		bash -c "${commands_to_use}" &
+
+		# Adding a unit for the "item_processed_partial" variable to control how many parallel processess
+		item_processed_partial=$[ $item_processed_partial + 1]
+
+		# Adding a unit for the "item_processed_global" variable to set the last process number
+		item_processed_total=$[ $item_processed_total + 1]
+
+		# Determining the number of processors to use
+		if [ -z "${number_processors_to_use}" ] || [ "${number_processors_to_use}" -ge ${number_processors} ] # In this case, user did not enter a number or entered a number greater than the number of processors available - thus going to use the max available
+		then
+			number_processors_to_use=${number_processors}
+		else
+			echo -en
+		fi
+
+		# This will limit the number of processes being called to a number: 1) equal to the amount of cores in the processing computer; OR 2) equal to the number of items to be processed (this make the script wait for all items to be processed before moving on); OR 3) If the total number of processes is equal to the number of the last process (this will make the script wait for the last process to finish before moving on)
+		if [ ${item_processed_partial} -eq ${number_processors_to_use} ] || [ ${item_processed_partial} -eq ${items_to_process} ] || [ ${item_processed_total} -eq ${items_to_process} ]
+		then
+			wait
+
+			# Resetting the variable "item_processed_partial" to zero, in order to re-start the counting of items processed
+			item_processed_partial=0
+		fi
+
+		# Cleaning up these variables since they were exported
+		unset item
+	done
+
+elif [ ${mode_processing} = nonPPSS ]
+then
+	# TO BE CONSTRUCTED
+	echo -en
+fi
+
+# Giving the finishing processing time
+echo
+echo -e "Processing finished on: `date`"
+}
+
+function log_file_scripts_used {
+# This function creates a log file as a text file with various features of the script being used, and the analysis software
+# It outputs the characteristics of the calling script (date and time when called, FSL version)
+
+# This function should be called in the beginning of the script, usually right after the main option chosen by the user (if there is one)
+# The finish call it is in the very end, when the script is about to exit to the min menu
+
+# It uses 4 parameters in the "start" call:
+	# 1. Flag to signal if this function is being called when the calling script starts or when it has finished (values = "start", "finish", "midscript", "interrupt")
+	# 2. The calling script name and the specific purpose (these are separated by semicolon, e.g., "motion_outliers:Outliers detection")
+	# 3. The analysis software type related to the script's use (values = "FSL", "Freesurfer", "none")
+	# 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc. OR "none") HAS TO USE QUOTES IN THE CALLING SCRIPT IF MORE THAN ONE TOOL, SO THEY CAN BE REPORTED SEPARATED BY SPACES
+
+# For the "midscript" call, it only uses parameter # 1 and parameter #2
+	# 1. Flag to signal if this function has additional information to be logged during script execution (value = midscript)
+	# 2. The additional info to be logged
+
+# For the "finish" call, it only uses parameter # 1 and # 2
+	# 1. Flag to signal if this function is being called when the calling script starts or when it has finished (value = finish)
+	# 2. List of the subjects processed
+
+# If the user interrupts the script using this function, the "trap" command in the beginning of that script will flag it using parameter # 1 (interrupt)
+	# 1. Flag to signal if this function is being called when the calling script starts or when it has finished (value = interrupt)
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+local script_calling_timing="$1"
+local script_used_purpose="$2"
+local analysis_software="$3"
+local tools_used="$4"
+
+# Checking if this is a "start" or "finish" call to this function
+if [ ${script_calling_timing} = start ] # Using PARAMETER #1
+then
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Gathering log information..."
+
+	# First, it checks if there is a "log_files_script" folder within the directory as pointed by the variable "FULLPATH"
+	if [ -d "${FULLPATH}/log_files_scripts" ]
+	then
+		# Gathering into separate variables the calling script and its purpose
+		local script_used=`echo $script_used_purpose | awk -F: '{print $1}'`
+		local script_purpose=`echo $script_used_purpose | awk -F: '{print $2}'`
+
+		# Checking the computer's operational system, extracting the computer and OS system information
+		if [ `uname -s` = Darwin ] # if this is a computer using Mac OS X
+		then
+			# Gathering the computer and OS system information into variables
+			local computer_name=`system_profiler SPSoftwareDataType | grep "Computer Name" | awk -F: '{print $2}'`
+			local user_name=`system_profiler SPSoftwareDataType | grep "User Name" | awk -F: '{print $2}'`
+			local computer_model=`system_profiler SPHardwareDataType | grep "Model Identifier" | awk -F: '{print $2}'`
+
+			local processor_name=`system_profiler SPHardwareDataType | grep "Processor Name" | awk -F: '{print $2}'`
+			local processor_speed=`system_profiler SPHardwareDataType | grep "Processor Speed" | awk -F: '{print $2}'`
+			local processor_number=`system_profiler SPHardwareDataType | grep "Number of Processors" | awk -F: '{print $2}'`
+			local processor_physical_cores=`sysctl hw.physicalcpu | awk '{print $2}'`
+			local processor_logical_cores=`sysctl hw.logicalcpu | awk '{print $2}'`
+			local system_memory=`system_profiler SPHardwareDataType | grep "Memory" | awk -F: '{print $2}'`
+
+			local OS_installed=`sw_vers -productName`
+			local OS_version=`sw_vers -productVersion`
+			local OS_build_version=`sw_vers -buildVersion`
+			local OS_kernel=`system_profiler SPSoftwareDataType | grep "Kernel Version" | awk -F: '{print $2}'`
+		else
+			# Gathering the computer and OS system information into variables
+			local computer_name=unknown
+			local user_name=unknown
+			local computer_model=unknown
+
+			local processor_name=unknown
+			local processor_speed=unknown
+			local processor_number=unknown
+			local processor_cores=unknown
+			local system_memory=unknown
+
+			local OS_installed=unknown
+			local OS_version=unknown
+			local OS_build_version=unknown
+			local OS_kernel=unknown
+		fi
+
+		# Getting the date and time for processing with and without spaces.
+		local log_file_date_time_processing=`current_date_time 2` # With spaces
+		local log_file_date_time_processing_nospaces=`current_date_time 1` # Without spaces
+
+		# Using some of the variables to create a unique output file name. It uses a GLOBAL variable (instead of local) so this function can use this variable again later.
+		log_file_output_filename="${FULLPATH}/log_files_scripts/${script_used}__${log_file_date_time_processing_nospaces}.txt"
+
+		# Checking what software is being used. Using PARAMETER # 3
+		if [ ${analysis_software} = none ]
+		then
+			local version_software="No neuroimaging analysis software used"
+
+		elif [ ${analysis_software} = FSL ]
+		then
+			# Checking the version of FSL being used
+			local version_software="FSL `cat ${FSLDIR}/etc/fslversion`"
+
+		elif [ ${analysis_software} = Freesurfer ]
+		then
+			# Checking the version of Freesurfer being used
+			local version_software="`cat ${FREESURFER_HOME}/build-stamp.txt`"
+
+		elif [ ${analysis_software} = DTI-TK ]
+		then
+			# Checking the version of DTI-TK being used
+			local version_software="`echo ${DTITK_ROOT} | awk -F/ '{print $NF}'`"
+		fi
+
+		# Outputing the log file
+		echo -e "Description of the script used for processing and other features\n" > ${log_file_output_filename}
+
+		echo -e "Logging starting at = ${log_file_date_time_processing}" >> ${log_file_output_filename}
+		echo -e "Script used = ${script_used}" >> ${log_file_output_filename}
+		echo -e "Script purpose = ${script_purpose}\n" >> ${log_file_output_filename}
+
+		echo -e "Software type and version = ${version_software}" >> ${log_file_output_filename}
+		echo -e "Software tools used (preceeded by script function that uses it) = ${tools_used}\n" >> ${log_file_output_filename}
+
+		echo -e "Computer name = ${computer_name}" >> ${log_file_output_filename}
+		echo -e "User name = ${user_name}" >> ${log_file_output_filename}
+		echo -e "Computer model = ${computer_model}\n" >> ${log_file_output_filename}
+
+		echo -e "Processor = ${processor_name}" >> ${log_file_output_filename}
+		echo -e "Processor speed = ${processor_speed}" >> ${log_file_output_filename}
+		echo -e "Number of processor(s) = ${processor_number}" >> ${log_file_output_filename}
+		echo -e "Number of physical cores = ${processor_physical_cores}" >> ${log_file_output_filename}
+		echo -e "Number of logical cores (hyper-threading) = ${processor_logical_cores}" >> ${log_file_output_filename}
+		echo -e "System memory = ${system_memory}" >> ${log_file_output_filename}
+
+		echo -e "Operational system (OS) = ${OS_installed}"  >> ${log_file_output_filename}
+		echo -e "OS version (build) = ${OS_version} (${OS_build_version})"  >> ${log_file_output_filename}
+		echo -e "OS kernel = ${OS_kernel}"  >> ${log_file_output_filename}
+
+		# Giving feedback to the user
+		echo
+		echo -e "Initial Log info processed. See it here: \"${log_file_output_filename}\""
+		echo -en "When the script ends, a time stamp will be added to the log file. Moving on..."
+
+		sleep 1
+		echo
+	else
+		echo
+		echo -e "There is no folder named: log_files_scripts"
+		echo -e "In this directory: ${FULLPATH}"
+
+		echo
+		echo -e "No log file will be generated from using this script = `echo ${script_used_purpose} | awk -F: '{print $1}'`"
+		echo -en "Press anykey to continue "
+		read -n1 anykey
+	fi
+
+elif [ ${script_calling_timing} = midscript ]
+then
+	# Outputing to the log file
+	# First, it checks if there is a "log_files_script" folder within the directory as pointed by the variable "FULLPATH"
+	if [ -d "${FULLPATH}/log_files_scripts" ]
+	then
+		# Getting the date and time for processing with and without spaces.
+		local log_file_date_time_processing=`current_date_time 2` # With spaces
+
+		echo -e "\nAdditional info entered at ${log_file_date_time_processing}" >> ${log_file_output_filename}
+		echo -e "Info = ${script_used_purpose}" >> ${log_file_output_filename}
+	fi
+
+elif [ ${script_calling_timing} = finish ]
+then
+	# Outputing to the log file
+	# First, it checks if there is a "log_files_script" folder within the directory as pointed by the variable "FULLPATH"
+	if [ -d "${FULLPATH}/log_files_scripts" ]
+	then
+		# Getting the date and time for processing with and without spaces.
+		local log_file_date_time_processing=`current_date_time 2` # With spaces
+
+		echo -e "\nLogging finished at = ${log_file_date_time_processing}" >> ${log_file_output_filename}
+		echo -e "\nList of subjects processed = ${script_used_purpose}" >> ${log_file_output_filename}
+	fi
+
+elif [ ${script_calling_timing} = interrupt ]
+then
+	# Outputing to the log file
+	# First, it checks if there is a "log_files_script" folder within the directory as pointed by the variable "FULLPATH"
+	if [ -d "${FULLPATH}/log_files_scripts" ]
+	then
+		# Getting the date and time for processing with and without spaces.
+		local log_file_date_time_processing=`current_date_time 2` # With spaces
+
+		echo -e "\nScript interrupted (user pressed "Ctrl + c") at this date and time = ${log_file_date_time_processing}" >> ${log_file_output_filename}
+	fi
+fi
+}
+
+function current_date_time {
+# This function provides the date and time to be used within scripts
+# It has different versions of date and time according to the script's needs: 1. Use it as part of a file name (no spaces); 2. Used as output for excel export (no semicolon) OR textual display to the user (no limitations on output format)
+
+# It uses 1 parameter:
+	# 1) Version of the date and time format to be used: 1 = file name; 2 = spreadsheet_export OR textual display
+	# Example of function use:
+# 	# Creating a variable with current time to stamp mark the text file holding the variables. Notice the call for function "current_date_time" from mainscrcall_funclib, to output the date and time. Using parameter "1" so there are no spaces.
+# 	var_text_date=`current_date_time 1`
+# 
+# 	cd ${FULLPATH}/${variables_folder}
+# 
+# 	echo "Date: `current_date_time 2`" > ${var_text_date}_${file_identifier}_var.txt
+# 	echo "Variables entered for the analysis of the following subjects:" >> ${var_text_date}_${file_identifier}_var.txt
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+local version_needed="$1"
+
+# Checking which version to be used
+if [ $version_needed = 1 ] # NO SPACES: To be used in file names, thus uses underscores instead of spaces
+then
+	date_time_display=`date +"%Y%m%d_%Hh%Mm"`
+
+elif [ $version_needed = 2 ] # TEXTUAL DISPLAY: This is to display to the user while using a script or for spreadsheet output, as it does not contain semicolons
+then
+	# For display to the user
+	date_time_display=`date +"%Y %B %d (%a) - %Hh%Mm%Ss %Z"`
+fi
+
+# Outputing the chosen format to the script that called this function (NOT to the user)
+echo ${date_time_display}
+}
+
+function test_programs_available {
+echo
+# THIS FUNCTION WILL INCLUDE A COMMAND TO TEST IF REQUIRED PROGRAMS FOR PROCESSING DATA ARE AVAILABLE, SUCH AS PPSS, DCM2NII, ETC ####
+
+}
+#####################################################################################
+
+######################################################################################
+##### 			Mathematical and statistical functions 		 			 #####
+######################################################################################
+
+# function mean_column {
+# # This function calculates the mean for all values in a column using "awk"
+# # Example command to calculate the mean for 2nd column from file "file.txt" that has values separated by ":"
+# # awk -F: '{ total += $2; count++ } END { print total/count }' file.txt
+# }
+
+function stat_std_dev {
+# Original version obtained from: http://tldp.org/LDP/abs/html/contributed-scripts.html#STDDEV
+
+# 2009-03-09: Panagiotis Kritikakos
+# http://panoskrt.wordpress.com/2009/03/10/shell-script-for-standard-deviation-arithmetic-mean-and-median/
+
+# Adapted by Estephan Moana in 2011/05/11
+# Usage: has to pass 2 parameters when calling this function:
+#	1. The mean value
+#	2. File containing all data points
+
+# ------------------------------------------------------------
+#  The Standard Deviation indicates how consistent a set of data is.
+#  It shows to what extent the individual data points deviate from the
+#+ arithmetic mean, i.e., how much they "bounce around" (or cluster).
+#  It is essentially the average deviation-distance of the
+#+ data points from the mean.
+
+# =========================================================== #
+#    To calculate the Standard Deviation:
+#
+# 1  Find the arithmetic mean (average) of all the data points.
+# 2  Subtract each data point from the arithmetic mean,
+#    and square that difference.
+# 3  Add all of the individual difference-squares in # 2.
+# 4  Divide the sum in # 3 by the number of data points.
+#    This is known as the "variance."
+# 5  The square root of # 4 gives the Standard Deviation.
+# =========================================================== #
+
+count=0         # Number of data points; global.
+SC=6            # Scale to be used by bc. Six decimal places.
+
+mean1=$1  # Arithmetic mean (passed to function).
+datafile=$2 # Input data file
+
+# Checking if the input file is not empty - if it is, this function will not work and will stop processing for ALL SUBJECTS
+if [ -s $datafile ]
+then
+	n=`wc -l < $datafile`    # How many data points.
+	sum2=0    # Sum of squared differences ("variance").
+	avg2=0    # Average of $sum2.
+	sdev=0    # Standard Deviation.
+
+	for value in `cat $datafile`   # Read one line at a time.
+	do
+		diff=$(echo "scale=$SC; $mean1 - $value" | bc)
+		# Difference between arith. mean and data point.
+		dif2=$(echo "scale=$SC; $diff * $diff" | bc) # Squared.
+		sum2=$(echo "scale=$SC; $sum2 + $dif2" | bc) # Sum of squares.
+	done
+
+	avg2=$(echo "scale=$SC; $sum2 / $n" | bc)  # Avg. of sum of squares.
+	sdev=$(echo "scale=$SC; sqrt($avg2)" | bc) # Square root =
+	echo $sdev                                 # Standard Deviation.
+else
+	echo "No Std Dev-file is empty"
+fi
+}
+
+function stat_median {
+# Function stat_median() added for calculating the median value
+# of the data set
+
+# Usage: has to pass 1 parameter when calling this function:
+#	1. File containing all data points
+
+# SC=6            # Scale to be used by bc. Six decimal places.
+SC=4            # Scale to be used by bc. Four decimal places.
+datafile=$1
+
+# Checking if the input file is not empty - if it is, this function will not work and will stop processing for ALL SUBJECTS
+if [ -s $datafile ]
+then
+	NUMS=(`sort -n $datafile`)
+	TOTALNUMS=${#NUMS[*]}
+	MOD=$(($TOTALNUMS % 2))
+
+	if [ $MOD -eq 0 ]
+	then
+		ARRAYMIDDLE=$(echo "($TOTALNUMS / 2)-1" | bc)
+		ARRAYNEXTMIDDLE=$(($ARRAYMIDDLE + 1))
+		MEDIAN=$(echo "scale=$SC; ((${NUMS[$ARRAYMIDDLE]})+(${NUMS[$ARRAYNEXTMIDDLE]})) / 2" | bc)
+	elif [ $MOD -eq 1 ]
+	then
+		ARRAYMIDDLE=$(echo "($TOTALNUMS / 2)" | bc)
+		MEDIAN=${NUMS[$ARRAYMIDDLE]}
+	fi
+	echo $MEDIAN
+else
+	echo "No median - file is empty"
+fi
+}
+
+#################################################################
+
+function numbered_list_display {
+# This function can be used whenever there is a need to retrieve the options chosen by the user from a numbered list of items
+# It makes it easier for the user to make choices, as instead of having them to copy and paste the items of interest they can just choose the corresponding number
+
+# Usage: has to pass 2 parameters when calling this function:
+#	1. A variable with all the files in a numbered list
+#	2. A variable with the numbers chosen by the user corresponding to the files to be used
+# In the script that calls this function, it must collect the values within the variable "files_to_use" into another variable in the calling script - i.e., calling_Script_variable="${files_to_use}"
+
+##### Example code to call this function for FILES #####
+
+# # Collecting the anatomical files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+# var1_available=`ls ${FULLPATH}/${SUBJ}/anat/*.nii.gz | sed 's!'${FULLPATH}/${SUBJ}/anat/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+# var2_list="${anat_file_list}" # The numbers chosen by the user corresponding to the files to be used
+#
+# # Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+# numbered_list_display "${var1_available}" "${var2_list}"
+#
+# # Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script. NOTE THE USE OF THE echo COMMAND HERE TO AVOID SPACES IN THE VARIABLE CONTENT
+# anatfiles_to_use=`echo ${files_to_use}`
+#
+# # Cleaning the contents of the variables below
+# unset files_to_use
+
+##### Example code to call this function for files that includes the option to enter "all" for avoid chosing each file individually #####
+
+# # Checking if all ANATOMICAL files must be processed or just selected ones
+# if [ "${anat_files_chosen}" = all ]
+# then
+# 	anat_files_chosen=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*.nii.gz 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!'`
+#
+# 	# Checking if there are already reoriented ANATOMICAL files
+# 	ANATLIST_reoriented=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*_stdMNI.nii.gz 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!'`
+# else
+# 	# Collecting the functional run folders available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+# 	var1_available=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*.nii.gz 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+# 	var2_list="${anat_files_chosen}" # The numbers chosen by the user corresponding to the files to be used
+#
+# 	# Calling the function "numbered_list_display" to present the functional run folders available in a numbered list to the user. Note the parameters to be passed on to the function
+# 	numbered_list_display "${var1_available}" "${var2_list}"
+#
+# 	# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+# 	anat_files_chosen="${files_to_use}"
+#
+# 	# Cleaning the contents of the variables below
+# 	unset files_to_use
+# fi
+
+##### Example code to call this function for contents of a VARIABLE #####
+
+# # Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+# # Establishing the initial subject numbering
+# subjnumber=1
+#
+# for subj in ${SUBJLIST}
+# do
+# 	echo "${subjnumber}) ${subj}"
+#
+# 	# Adding a unit to the numbering variable
+# 	subjnumber=$[ $subjnumber + 1 ]
+# done
+#
+# # Cleaning the contents of the numbering variable
+# unset subjnumber
+
+# # Collecting the subjects listed in the "SUBJLIST" variable into another variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+# var1_available=`for subj in ${SUBJLIST}; do echo "${subjnumber}=${subj}"; subjnumber=$[ $subjnumber + 1 ]; done` # variable with all the files in a numbered list
+# var2_list="${SUBJLIST_to_process}" # The numbers chosen by the user corresponding to the files to be used
+#
+# # Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+# numbered_list_display "${var1_available}" "${var2_list}"
+#
+# # Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+# SUBJLIST_to_process="${files_to_use}"
+#
+# # Cleaning the contents of the variables below
+# unset files_to_use
+# unset subjnumber
+
+#########################################
+### 			Function Proper	 ####
+#########################################
+
+# Listing all files available for the subject being processed. The "local" before the variable ensure that the variable is limited only to within this function
+local files_available="$1" # variable with all the files in a numbered list
+local file_list="$2" # The numbers chosen by the user corresponding to the files to be used
+
+# Loop to associate each number chosen by user to the corresponding item listed
+for file_number in ${file_list} # This will loop through only the items chosen by the user
+do
+	# Loop to go through each item
+	for item in ${files_available} # This will show all items available
+	do
+		# This command will gather into a variable all items numbers by: 1. listing all items available one by one (echo command); then 2. will only show the items chosen by the user as the 1st sed command triages out all but the ones that match the number of the file chosen by the user; and 3. cleaning their numbering (e.g. 1=) for presentation to the user (2nd sed command)
+		local files_numbered=`echo $item | sed -n "/^${file_number}=/p" | sed "s/${file_number}=//"`
+
+		# The variable "files_to_use" is declared as global (instead of local) so it can pass its value for the script that used this function
+		files_to_use="${files_to_use} ${files_numbered}"
+	done
+done
+}
+
+function machine_local-network {
+# This function will check if the machine running the scripts is a local or a remote one (will change the way scripts using parallel processing behave)
+
+#### LOCAL x NETWORK MACHINE: Determining if this is a local machine or a network node (e.g., UNC computing cluster node) ######
+# Reading the output of the uname command to know which operating system is being used. This ouput will be the kernel name. This will be used by other scripts so they know which OS is being used and behave accordingly
+# Mac OS X = Darwin | Linux flavors = Linux
+os_name=`uname -s`
+
+# Checking the OS system to see if it is a local computer or the UNC computing cluster to proceed with the proper command
+#  The -n option retrieves the network name of the computer, so according to the cluster used it will have a particular name
+# KillDevil cluster = killdevil | Kure cluster = kure
+network_nodename=`uname -n | awk -F- '{print $1}'`
+
+# Checking the path to the "home" folder. If starts with "Users" it is a local Mac OS X machine
+homefolder_path=`echo $HOME | awk -F/ '{print $2}'`
+
+# Checking the user name within the path to the "home" folder. for U of M supercomputer, value is "moanae"
+homefolder_username=`echo $HOME | awk -F/ '{print $3}'`
+
+# Checking all 3 conditions above.
+if [ -n "${os_name}" ] && [ ${os_name} = Darwin ] && [ ${homefolder_path} = Users ]
+then # In this case the OS is "Darwin", the first folder in the "home" folder is "User" and the netwok node name is NOT one of the UNC clusters
+	# Variable to note if this is a local or a network machine
+	MACHINE_LOCALorREMOTE=local
+
+	# Variable holding the OS full name and version
+	local os_nameandversion_temp=`sw_vers -productName; sw_vers -productVersion`
+
+	# Removing the newline from the variable contents
+	os_nameandversion=`echo ${os_nameandversion_temp} | tr '\n' ' '`
+
+	# Giving feedback to the user
+	echo
+	echo -e "###########################################################"
+	echo -e "#############     This is a LOCAL machine     #############"
+	echo -e "###########################################################"
+
+	echo
+	echo -e "Operational system: `echo ${os_nameandversion}`"
+	echo -e "Network node name: `uname -n`"
+	echo -e "Home folder path: ${HOME}"
+	echo -e "All scripts that do parallel processing will use the \"PPSS\" software"
+
+	echo
+	echo -en "Press any key to continue "
+	read -n1 anykey
+
+elif [ -n "${os_name}" ] && [ ${os_name} = Linux ] && [ ${homefolder_path} != Users ]
+then # In this case the OS is "Darwin", the first folder in the "home" folder is "User" and the netwok node name is NOT one of the UNC clusters
+	# Variable to note if this is a local or a network machine
+	MACHINE_LOCALorREMOTE=remote
+
+	# Variable holding the OS full name and version
+	local os_nameandversion_temp=`cat /etc/redhat-release`
+
+	# Removing the newline from the variable contents
+	os_nameandversion=`echo ${os_nameandversion_temp} | tr '\n' ' '`
+
+	# Giving feedback to the user
+	echo
+	echo -e "################################################################"
+	echo -e "###############     This is a REMOTE machine     ###############"
+	echo -e "################################################################"
+
+	echo
+	echo -e "Operational system: ${os_name}"
+	echo -e "Network node name: `uname -n`"
+	echo -e "Home folder path: ${HOME}"
+	
+	# Checking which supercomputer being used
+	if [ ${homefolder_username} = moanae ] # User name for U of M supercomputer
+	then
+		echo -e "All scripts that do parallel processing will use the \"qsub\" command for U of M computing clusters instead of \"PPSS\""
+	else # In this case, it assumes it will use the UNC computing clusters
+		echo -e "All scripts that do parallel processing will use the \"bsub\" command for UNC computing clusters instead of \"PPSS\""
+	fi
+
+	echo
+	echo -en "Press any key to continue "
+	read -n1 anykey
+else
+	echo
+	echo -e "##### WARNING: Could not detect if this is a local or a network machine! #####"
+	echo -e "This is crucial for some scripts"
+	echo -e "Please check possible causes for the inability to identify this machine before running this script again"
+
+	echo
+	echo -e "Find below some information of this machine:"
+	echo -e "Operational system name: `uname -s`"
+	echo -e "Network node name: `uname -n`"
+	echo -e "Home folder path: ${HOME}"
+
+	echo -en "Aborting in 3 seconds "
+
+	sleep 3
+	echo
+
+	exit
+fi
+
+# Exporting the variable below so other scripts can use it
+export MACHINE_LOCALorREMOTE
+export os_nameandversion
+export homefolder_username
+
+# Cleaning the screen
+clear
+###############################################################################################################################
+}

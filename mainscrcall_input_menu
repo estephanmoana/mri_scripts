@@ -1,0 +1,786 @@
+#! /bin/bash
+
+# Script with functions to create folders for storage, subjects and to export variables contents
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to INPUT menu
+trap "echo -en '\n\nGoing back to the INPUT menu '; sleep 2; exit" SIGINT
+
+function export_variables_parent_script {
+# Function created to export variables contents from this script to the parent script "fmrianalysis_FSL"
+cd /tmp
+
+# Removing previously created folders for the temporary info
+rm -R /tmp/input_menu_variables 2> /dev/null
+
+# Creating a folder to hold the temporary info
+mkdir /tmp/input_menu_variables
+
+# Creating the file with the variables contents
+echo EXPERIMENT_var=${EXPERIMENT} > /tmp/input_menu_variables/variable_contents.txt
+echo MEDIA_var=${MEDIA} >> /tmp/input_menu_variables/variable_contents.txt
+echo FULLPATH_var=${FULLPATH} >> /tmp/input_menu_variables/variable_contents.txt
+# echo SUBJS_FOLDERS_PATH_var=${SUBJS_FOLDERS_PATH} >> /tmp/input_menu_variables/variable_contents.txt
+echo SUBJLIST_var="${SUBJLIST}" >> /tmp/input_menu_variables/variable_contents.txt
+echo SUBJECTS_DIR_var=${SUBJECTS_DIR} >> /tmp/input_menu_variables/variable_contents.txt
+}
+
+function mainmenu_process {
+# Calling the function "storage_fold" to collect information on the "experiment" folder. Note the parameter to flag that this function will not be used alone (if no parameter is included here, the "if then" to check for it will give an error since the variable "storage_folder_only" will be empty
+storage_fold not_only_storage
+
+# Calling the function "subjs_list" to collect information on the subjects' folders. Note the parameter to flag that this function will not be used alone (if no parameter is included here, the "if then" to check for it will give an error since the variable "subjs_folder_only" will be empty
+subjs_list not_only_subjs
+
+# subjdata menu logic #
+while [ 1 ]
+do
+	# Shows the data entered and ask for user confirmation
+	clear
+	echo -e "\tThis is the information entered. Please check carefully\n"
+
+	# Listing all variables entered
+	echo -e "Experiment name: ${EXPERIMENT}\n"
+
+	echo -e "Storage path to be used: ${MEDIA}\n"
+
+	echo -e "Full path for the data analysis output: ${FULLPATH}\n"
+
+# 	echo -e "Full path for subjects' folders: ${SUBJS_FOLDERS_PATH}\n"
+
+	echo -e "Subjects entered:\n"
+
+	# Establishing tne initial subject numbering
+	item_number=1
+
+	for item in ${SUBJLIST}
+	do
+		item_number=`printf "%02d" ${item_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+		echo "${item_number}) $item"
+
+		# Adding a unit to the variable item_number
+		item_number=$[10#$item_number + 1 ]
+	done
+
+	unset item_number
+
+	echo -e "\n"
+
+	echo -e "\tPlease choose next action\n"
+
+	echo -e "\t1. Accept data entered and back to main menu"
+	echo -e "\t2. Correct entered data"
+	echo -e "\t0. Abort and exit to main menu\n"
+
+	echo -en "\t\tEnter your option here: "
+	read option_smenu05
+
+	case $option_smenu05 in
+	0)
+		break
+		;;
+	1)
+		# Calling the function "export_variables_parent_script" to export variables contents to a text file
+		export_variables_parent_script
+
+		break
+		;;
+	2)
+		# Calling function "correctdata" so the data entered can be corrected
+		correctdata
+		;;
+	*)
+		clear
+		echo -e "No valid option chosen\n"
+		;;
+	esac
+done
+}
+
+function storage_fold {
+##########	THIS FUNCTION ALLOW CHANGING INFORMATION FOR STORAGE AND EXPERIMENT VARIABLES	##########
+
+# Entering the /tmp directory just in case any errors occur, it will not mess up the filesystem
+cd /tmp
+
+# This function collect 1 parameter to signal if it was called by itself to modify only the path for the storage folder, or if it was called to modify both the paths for storage and subject's folders
+local storage_folder_only="$1" # Stores the parameter value, if it was provided (only_storage)
+
+# While loop to request user to enter information for the path of the fMRI data folder
+while [ 1 ]
+do
+	echo -e "\n"
+	echo -e "\t\tPlease enter the requested information, followed by \"enter\"\n"
+
+	echo -e "\tEnter the path to the main folder in your hard disk where you store your imaging data"
+	echo -e "\tYou need to enter the absolute path, starting from root \"/\""
+	echo -e "\tAn example path would be: /media/hard_disk1/data_analysis_MRI\n"
+
+	echo -en "\tEnter here: "
+	read MEDIA
+
+	# Showing the contents of the folder entered above to the user
+	echo
+	echo -e "You entered: \"${MEDIA}\""
+
+	echo
+	echo -e "Which contains the below folders:\n"
+
+	ls -d ${MEDIA}/* | sed 's!'${MEDIA}/'!!' | sed "=" | sed 'N; s/\n/) /'
+
+	echo
+	read -p "Is this correct? (y/n) " yesno
+
+	if [ $yesno = y ]
+	then
+		echo -e "\n\n"
+		echo -e "\tDirectory ${MEDIA} accepted"
+
+		break
+	else
+		echo -e "\n"
+		echo -en "\tPlease re-enter the path to the desired directory "
+
+		sleep 2
+	fi
+done
+
+# Checking if need to create an "experiment" folder or not by using the variable "create_exp_folder" created within the Main Menu
+if [ ${create_exp_folder} = yes ] # This will allow to create an "experiment" folder (NEW STUDY)
+then
+	echo
+	echo -e "\tPlease provide a \"experiment\" name to label the folder that will be created to hold all processed data (do not use spaces between words, only underscore (_)"
+	echo -en "\tEnter here: "
+	read EXPERIMENT
+
+	# Creating the variable "FULLPATH" that holds the path to the main folder
+	FULLPATH="${MEDIA}/${EXPERIMENT}"
+
+# 	##### Variable "subjs_folder" that holds the path to the subjects folders #####
+# 	SUBJS_FOLDERS_PATH=${FULLPATH}/subjs
+
+	# This will check if a folder named the same as the "experiment" above exists. It is assumed that this folder was not created already
+	if [ -d ${FULLPATH} ]
+	then
+		echo
+		echo -e "\t *** Directory ${FULLPATH} already exists ***\n"
+
+		echo -e "\tIf your intention is to create a new \"experiment\" folder instead of using an existing one, please enter a different \"experiment\" name"
+		echo -e "\tBut if you want to enter subjects info for folders that reside or will be created within the \"${EXPERIMENT}\" folder, then in the previous menu (INPUT menu) you need to use option \"2.  Manually - to enter subjects info for an existing \"experiment\" folder\""
+
+		unset FULLPATH SUBJS_FOLDERS_PATH
+
+		echo
+		read -n1 -p "Press any key to go back to the INPUT menu " anykey
+	else
+		echo
+		echo -e "The folder below does not exist yet, and will be created when you choose the option \"c\" in the input menu\n"
+
+		echo -e "Main path for the study folders: ${FULLPATH}"
+# 		echo -e "Main path for the subjects folders: ${SUBJS_FOLDERS_PATH}"
+
+	fi
+
+elif [ ${create_exp_folder} = no ] # This will NOT create an "experiment" folder (CURRENT STUDY)
+then
+		echo
+		echo -en "\tEnter the number corresponding to the desired \"experiment\" folder contained above: "
+		read EXPERIMENT
+
+		# Collecting the folders available into a variable to be used in the FUNCTION "NUMBERED_LIST" (mainscrcall_funclib)
+		var1_available=`ls -d ${MEDIA}/* | sed 's!'${MEDIA}/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+		var2_list="${EXPERIMENT}" # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the folders available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		EXPERIMENT=`echo ${files_to_use}` # Has to use the "echo" command since the variable "files to use" has spaces in it due to the loop within the function "NUMBERED_LIST" (mainscrcall_funclib)
+
+		# Clearing up this variables content prior to reusing this function
+		unset files_to_use
+
+		# Creating the variable "FULLPATH" that holds the path to the main folder
+		FULLPATH="${MEDIA}/${EXPERIMENT}"
+
+# 		##### Variable "subjs_folder" that holds the path to the subjects folders #####
+# 		SUBJS_FOLDERS_PATH=${FULLPATH}/subjs
+
+		# Check if folder entered above is valid
+		foldercheck=${FULLPATH}
+		checkfoldexist2
+
+		# Allowing time for the user to see the outcome of the check above
+		sleep 2
+fi
+
+# # Defining the name for the folder to hold freesurfer analysis
+# SUBJECTS_DIR=${FULLPATH}/analysis_freesurfer
+
+# Checking if the function was called with the parameter "only_storage" signaled throught the local variable "storage_folder_only"
+if [ ${storage_folder_only} = only_storage ] # If this parameter was used, it signals that only this function will be used (and not "subjs_list") so it will need to export the variables modified here to a text file.
+then
+	# Calling the function "export_variables_parent_script" to export variables contents to a text file
+	export_variables_parent_script
+
+	# Cleaning the content of the local variable (just in case)
+	unset storage_folder_only
+fi
+}
+
+function subjs_list {
+##########	THIS FUNCTION ALLOW CHANGING INFORMATION FOR SUBJECT FOLDERS	##########
+
+# This function collect 1 parameter to signal if it was called by itself to modify only the path for the subject's folders, or if it was called to modify both the paths for storage and subject's folders
+local subjs_folder_only="$1" # Stores the parameter value, if it was provided (only_subjs)
+
+# Clearing the variable SUBJLIST
+unset SUBJLIST
+
+# Collecting subjects information #
+
+# Checking if need to create an "experiment" folder or not by using the variable "create_exp_folder" created within the Main Menu
+if [ ${create_exp_folder} = yes ] # Since it'll need to create an "experiment" folder (NEW STUDY), there are no subjects' folder yet to be listed
+then
+	echo -en
+
+elif [ ${create_exp_folder} = no ] # In this case, there should be subject(s)'s folders already created (CURRENT STUDY) and therefore could be listed
+then
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -e "\tLooking for subjects' folders previously created"
+
+	# Using the variable "subjs_created" to hold the contents of the folder for mri data
+	subjs_created=`ls -d ${SUBJS_FOLDERS_PATH}/* 2> /dev/null | sed "s!${SUBJS_FOLDERS_PATH}/!!" | sed "=" | sed 'N; s/\n/) /'` # lookup for folders within the "subjs" folder
+	
+	# Checking if the variable "subjs_created" is empty or not
+	if [ -n "${subjs_created}" ]
+	then
+		echo
+		echo -e "\tThese are the subjects' folders already created within the folder \"${EXPERIMENT}\": "
+
+		ls -d ${SUBJS_FOLDERS_PATH}/* 2> /dev/null | sed "s!${SUBJS_FOLDERS_PATH}/!!" | sed "=" | sed 'N; s/\n/) /'
+	else
+		echo
+		echo -e " *** No subjects' folder(s) found within the folder \"${EXPERIMENT}\" ***"
+	fi
+fi
+
+# Requesting the user to enter subjects' folder name info
+echo
+echo -e "\tPlease enter the subjects to be analyzed by typing their \"participant label\""
+echo -e "\t*** The folder name will be formatted properly per BIDS specification: sub-<participant_label> ***"
+echo -en "\tEach entry must be separated by a space: "
+read SUBJLIST_user
+
+# Loop to add the "sub-" to each subject's name to confirm with BIDS
+for temp_subj in ${SUBJLIST_user}
+do
+	# Adding the BIDS-formatted name to a variable
+	bids_subj=sub-${temp_subj}
+	
+	# Adding each BIDS-formatted name to the variable "SUBJLIST"
+	SUBJLIST="${SUBJLIST} ${bids_subj}"
+done
+
+# Checking if the function was called with the parameter "only_storage" signaled throught the local variable "storage_folder_only"
+if [ ${subjs_folder_only} = only_subjs ] # If this parameter was used, it signals that only this function will be used (and not "storage_fold") so it will need to export the variables modified here to a text file.
+then
+	# Calling the function "export_variables_parent_script" to export variables contents to a text file
+	export_variables_parent_script
+
+	# Cleaning the content of the local variable (just in case)
+	unset subjs_folder_only
+fi
+}
+
+function enterdattext {
+##########	THIS FUNCTION RETRIEVES INFORMATION FOR STORAGE, EXPERIMENT AND SUBJECT FOLDERS FROM A TEXT FILE	##########
+
+while [ 1 ]
+do
+	echo -e "\n"
+	echo -e "\tRetrieving subjects data through a text file\n"
+
+	echo -en "\tPlease enter the full path for the text files folder (including the folder name itself - e.g. /home/yourname/mri_data/experimentXXX/variables_text_files) and press enter: "
+	read fullpath_variables
+
+	# Show text file location entered and ask for user confirmation
+	echo
+
+	echo -e "\tThese are the text files contained in the above entered folder, if any:\n"
+
+	ls ${fullpath_variables}/*var*.txt | sed 's!'${fullpath_variables}/'!!' | sed "=" | sed 'N; s/\n/) /'
+
+	echo
+	echo -en "\tDoes this location contain the desired file? (y/n) "
+	read conftextloc
+
+	# retrieve user answer and proceeed accordingly
+	if [ ${conftextloc} = y ] || [ ${conftextloc} = Y ]
+	then
+		# Retrieve info from text file
+		echo -e "\n"
+		echo -en "\tPlease enter the number corresponding to the desired text file name and press enter: "
+		read textfile
+
+		# Collecting the DICOM folders available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+		var1_available=`ls ${fullpath_variables}/*var* | sed 's!'${fullpath_variables}/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+		var2_list="${textfile}" # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the DICOM folders available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		textfile=`echo ${files_to_use}`
+
+		# Cleaning the contents of the variables below
+		unset files_to_use
+
+		if [ -f ${fullpath_variables}/${textfile} ]
+		then
+			MEDIA=`grep MEDIA ${fullpath_variables}/${textfile} | sed -e 's/MEDIA=//; s/"//; s/"//'`
+			EXPERIMENT=`grep EXPERIMENT ${fullpath_variables}/${textfile} | sed -e 's/EXPERIMENT=//; s/"//; s/"//'`
+# 			SUBJS_FOLDERS_PATH=`grep SUBJS_FOLDERS_PATH ${fullpath_variables}/${textfile} | sed -e 's/SUBJS_FOLDERS_PATH=//; s/"//; s/"//'`
+			SUBJLIST=`grep SUBJLIST ${fullpath_variables}/${textfile} | sed -e 's/SUBJLIST=//; s/"//; s/"//'`
+			FULLPATH=${MEDIA}/${EXPERIMENT}
+
+			# Calling the function "export_variables_parent_script" to export variables contents to a text file
+			export_variables_parent_script
+
+			echo -e "\n"
+			echo -en "\tAll variables collected - press any key to go back to the main menu "
+			read -n1 anykey
+
+			break
+		else
+			echo
+			echo -e "### WARNING ###"
+			echo -e "This file does not exist: ${fullpath_variables}/${textfile}"
+			echo -en "Please check the if the path entered is correct and contains the desired file "
+
+			sleep 2
+		fi
+	else
+		echo -e "\n"
+		echo -en "\tNot the correct file location - proceeding to correct it "
+
+		sleep 2
+	fi
+done
+}
+
+function exportvars {
+##########	THIS FUNCTION EXPORTS VARIABLES CONTENTS TO TEXT FILE	##########
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar3
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar3
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar3
+
+# Exports variables created to a text file
+while [ 1 ]
+do
+	clear
+	echo
+	echo -e "\tWhat you do want to do?\n"
+	echo -e "\t1. Create a new variables text file"
+	echo -e "\t2. Append to an existing text file"
+	echo -e "\t0. Go back to main menu\n"
+	echo -en "\tEnter option: "
+	read expvars
+
+	case $expvars in
+	0)
+		clear
+		break ;;
+	1)
+		# Check if the user created the folders - can only export variables to text file if folders were created
+		echo -e "\n\n"
+		echo -en "Have you created the folders for this analysis already (must have)? (y/n) "
+		read crtfold
+		
+		# Checking user's input
+		if [ ${crtfold} = y ]
+		then
+			echo
+
+			ls ${FULLPATH}
+
+			echo
+			echo -en "\tEnter from the above folders the one containing the variables text file: "
+			read variables_folder
+
+			echo -e "\tIf any, these are the already created variables text files:\n"
+			ls ${FULLPATH}/${variables_folder}
+
+			echo
+			echo -en "\tNow enter an identifier for this variables text file with no spaces, e.g., \"all-subjs\" or \"first-5-subjs\": "
+			read file_identifier
+		else
+			echo -en "\nPlease create the folders using option \"b\" at the main menu so you can export the variables into a text file "
+			
+			sleep 2
+			
+			break
+		fi
+
+		# Proceed to create the text file
+
+		# Entering the /tmp directory just in case any errors occur, it will not mess up the filesystem
+		cd /tmp
+
+		# Creating a variable with current time to stamp mark the text file holding the variables. Notice the call for function "current_date_time" from mainscrcall_funclib, to output the date and time. Using parameter "1" so there are no spaces.
+		var_text_date=`current_date_time 1`
+
+		cd ${FULLPATH}/${variables_folder}
+
+		echo "Date: `current_date_time 2`" > ${var_text_date}_${file_identifier}_var.txt
+		echo "Variables entered for the analysis of the following subjects:" >> ${var_text_date}_${file_identifier}_var.txt
+
+		# Establishing tne initial subject numbering
+		item_number=1
+
+		for item in ${SUBJLIST}
+		do
+			item_number=`printf "%02d" ${item_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+			echo "${item_number}) $item" >> ${var_text_date}_${file_identifier}_var.txt
+
+			# Adding a unit to the variable item_number
+			item_number=$[10#$item_number + 1 ]
+		done
+
+		unset item_number
+
+		echo -e "\n" >> ${var_text_date}_${file_identifier}_var.txt
+		echo "MEDIA="${MEDIA}"" >> ${var_text_date}_${file_identifier}_var.txt
+		echo "EXPERIMENT="${EXPERIMENT}"" >> ${var_text_date}_${file_identifier}_var.txt
+# 		echo "SUBJS_FOLDERS_PATH="${SUBJS_FOLDERS_PATH}"" >> ${var_text_date}_${file_identifier}_var.txt
+		echo "SUBJLIST="${SUBJLIST}"" >> ${var_text_date}_${file_identifier}_var.txt
+
+		echo
+		echo -e "\tAll variables exported to the text file named "${var_text_date}_${file_identifier}_var.txt""
+
+		# Ask for user input to continue to main menu
+		echo -en "\nTo continue, press any key "
+		read -n1 continue
+
+		cd /tmp
+		break ;;
+	2)
+		# Entering the /tmp directory just in case any errors occur, it will not mess up the filesystem
+		cd /tmp
+
+		cd ${FULLPATH}
+
+		echo
+		echo -en "\tPlease enter the full path for the text files folder (including the folder name itself - e.g. /home/yourname/mri_data/experimentXXX/variables_text_files) and press enter: "
+		read fullpath_variables
+
+		# Show text file location entered and ask for user confirmation
+		echo
+
+		cd ${fullpath_variables}
+
+		echo -e "\tThese are the text files contained in the above entered folder, if any:\n"
+
+		echo -e "`ls *var*`"
+
+		cd /tmp
+
+		echo
+		echo -en "To which text file you want to append the data to? "
+		read append
+
+		echo -e "\n\n" >> ${append}
+		echo "Date: `current_date_time 2`" >> ${append}
+		echo "Variables entered for the analysis of the following subjects: ${SUBJLIST}" >> ${append}
+		echo -e "\n" >> ${append}
+		echo "MEDIA="${MEDIA}"" >> ${append}
+		echo "EXPERIMENT="${EXPERIMENT}"" >> ${append}
+		echo "DATADIR="${DATADIR}"" >> ${append}
+# 		echo "SUBJS_FOLDERS_PATH="${SUBJS_FOLDERS_PATH}"" >> ${append}
+		echo "SUBJLIST="${SUBJLIST}"" >> ${append}
+
+		echo
+		echo -e "\tAll variables exported to the text file "${append}
+
+		sleep 3
+
+		cd /tmp
+
+		break ;;
+	*)
+		clear
+		echo -e "No valid option chosen\n" ;;
+	esac
+done
+}
+
+function correctdata {
+##########	THIS FUNCTION CORRECTS INFORMATION FOR STORAGE, EXPERIMENT AND SUBJECT FOLDERS	##########
+
+# Correcting entered data #
+while [ 1 ]
+do
+	clear
+	echo
+	echo -e "\tWhat you need to correct?\n"
+	echo -e "\t1. Experiment name and/or storage path\n"
+	echo -e "\t2. Subjects list info entered\n"
+	echo -e "\t0. Go back to previous menu\n"
+	echo -en "\tEnter option: "
+	read option02
+
+	case $option02 in
+	0)
+		break ;;
+	1)
+		echo -e "\n"
+		echo -e "Current full path is ${FULLPATH}\n"
+
+		# Cleaning the contents of the variables below
+# 		unset FULLPATH MEDIA EXPERIMENT SUBJS_FOLDERS_PATH
+		unset FULLPATH MEDIA EXPERIMENT
+
+		echo -e " Experiment name and directory info removed\n"
+
+		# Entering the /tmp directory just in case any errors occur, it will not mess up the filesystem
+		cd /tmp
+
+		while [ 1 ]
+		do
+			echo
+			echo -e "\tRe-enter the path to the main folder in your hard disk where you store your fMRI data\n"
+			echo -e "\tYou need to enter the absolute path, starting from root \"/\"\n"
+			echo -e "\tAn example path would be: /media/hard_disk1/fmri_data\n"
+			echo -en "\tEnter here: "
+			read MEDIA
+
+			# Check if media entered exists
+			echo
+			echo -e "\tYou entered ${MEDIA}"
+			echo -e "\tWhich contains the below folders, if any:\n"
+
+			ls -d ${MEDIA}/* | sed 's!'${MEDIA}/'!!' 2> /dev/null
+
+			echo
+			read -p "Is this correct? (y/n) " yesno
+
+			if [ $yesno = y ]
+			then
+				echo -e "\n"
+				echo -e "\tDirectory ${MEDIA} accepted"
+
+				echo
+				echo -en "\tEnter the desired \"experiment\" folder name: "
+				read EXPERIMENT
+
+				# Creating the variable "FULLPATH" that holds the path to the main folder
+				FULLPATH="${MEDIA}/${EXPERIMENT}"
+
+# 				##### Variable "subjs_folder" that holds the path to the subjects folders #####
+# 				SUBJS_FOLDERS_PATH=${FULLPATH}/subjs
+
+				break
+			else
+				echo -e "\n"
+				echo -e "\tPlease re-enter the path to the desired directory\n"
+
+				clear
+			fi
+		done
+
+		break ;;
+	2)
+		# Cleaning the contents of the variable below
+		unset SUBJLIST
+
+		echo -e "\n"
+		echo -e "Subjects data entered removed\n"
+
+		echo -en "Enter the correct data: "
+
+		# Collecting subjects information #
+		echo
+		echo -e "\tIf any, these are the subjects folders already created within \"${EXPERIMENT}\": \n"
+
+		ls -d ${SUBJS_FOLDERS_PATH}/* | sed "s!${SUBJS_FOLDERS_PATH}/!!" 2> /dev/null
+
+		echo
+		echo -en "\tPlease re-enter the subjects to be analyzed by typing their \"participant label\""
+		echo -e "\t*** The folder name will be formatted properly per BIDS specification: sub-<participant_label> ***"
+		echo -en "\tEach entry must be separated by a space: "
+		read SUBJLIST
+
+		break ;;
+	*)
+		echo -e "\n"
+		echo -e "No valid option chosen\n"
+
+		sleep 3 ;;
+	esac
+done
+}
+
+function checkfold {
+#### This function is called by the script "mrianalysis_FSL" to check the folders created
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar3
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar3
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar3
+
+# Checking if any of the variables above are empty, and if so exiting this script
+if [ -n "${empty_variable}" ] && [ "${empty_variable}" = yes ] # Checks if this variable is not empty and if its contents are = "yes"
+then
+	# Cleaning the contents of the variable below
+	unset empty_variable
+
+	exit
+fi
+
+# Shows the data entered and ask for user confirmation
+clear
+
+echo -e "\tFolders contained within ${FULLPATH}:\n"
+# ls ${FULLPATH}
+
+# for SUBJ in ${SUBJLIST}
+# do
+# 	# Checking if folders for each subject was already created
+# 	if [ -d ${SUBJS_FOLDERS_PATH}/${SUBJ} ]
+# 	then
+# 		echo
+# 		echo -e "\tFolders created for subject ** ${SUBJ} **:\n"
+# 
+# 		ls ${SUBJS_FOLDERS_PATH}/${SUBJ}
+# 
+# 	else
+# 		echo
+# 		echo -e "*** No folder was created yet for subject \"${SUBJ}\" ***"
+# 	fi
+# done
+
+for SUBJ in ${SUBJLIST}
+do
+	# Checking if folders for each subject was already created
+	if [ -d ${FULLPATH}/${SUBJ} ]
+	then
+		echo
+		echo -e "\tFolders created for subject ** ${SUBJ} **:\n"
+
+		ls ${FULLPATH}/${SUBJ}
+
+	else
+		echo
+		echo -e "*** No folder was created yet for subject \"${SUBJ}\" ***"
+	fi
+done
+
+echo
+echo -e "Please check if the folder(s) you just entered is/are here\n"
+
+echo -en "\t\tPress any key to go back to INPUT menu "
+read -n 1 contchkvar
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+# Script Main menu - Entering the functions with the tasks in order
+
+# Checking if the variable "user_input" has content, and in such case only the specific function will be called. Otherwise, this script will go to its main menu below
+if [ -z "${user_input}" ] # Checking if this variable is empty, and if so goes to the main menu
+then
+	clear
+
+	#  Main menu logic
+	while [ 1 ]
+	do
+		echo
+# 		echo -e "\t\t** Data Entry submenu **\n"
+
+		echo -e "\t\tHow do you want to enter the \"experiment\" folder and subjects information to create/access the analysis output folders?\n"
+		echo -e "\t1. Manually - use this option if an \"experiment\" folder was not created yet (USUALLY NEW STUDIES)"
+		echo -e "\t2. Manually - to enter subjects info for an existing \"experiment\" folder (USUALLY ONGOING STUDIES)"
+		echo -e "\t3. Via a text file previously created"
+		echo -e "\t0. Abort and go back to main menu\n"
+
+		echo -en "\t\tEnter your option here: "
+		read option_enterdat
+
+		case $option_enterdat in
+		0)
+			break ;;
+		1)
+			clear
+			echo -e "\tEntering information to create an \"experiment\" and subjects' folders\n"
+
+			# Variable to flag the need or not to create an "experiment" folder (new study)
+			create_exp_folder=yes
+
+			# Calling the function "mainmenu_process" to continue processing
+			mainmenu_process
+
+			break
+			;;
+		2)
+			clear
+			echo -e "\tEntering subjects' folder info for an existing \"experiment\" folder\n"
+
+			# Variable to flag the need or not to create an "Experiment" folder (new study)
+			create_exp_folder=no
+
+			# Calling the function "mainmenu_process" to continue processing
+			mainmenu_process
+
+			break
+			;;
+		3)
+			# Reads the needed data from a text file
+			clear
+
+			enterdattext
+
+			break
+			;;
+		*)
+			echo
+			echo -e "No valid option chosen"
+			echo -en "Please re-enter an option "
+
+			sleep 2
+			;;
+		esac
+	done
+else # In this case the variable ${user_input} was not empty, so the main menu is SKIPPED
+	clear
+
+	# Variable to flag the need or not to create an "Experiment" folder (new study). Since only the "experiment" or the subjects' folders path will be changed, the "experiment" folder already exists
+	create_exp_folder=no
+
+	# Reading the variable "user_option" from the script " mrianalysis_mainscript" to determine which function to be used (from those above)
+	${user_input}
+fi

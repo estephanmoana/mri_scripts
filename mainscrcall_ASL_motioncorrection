@@ -1,0 +1,262 @@
+#! /bin/bash
+# Script to perform motion correction using MCFLIRT in ASL timeseries files
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+
+function ASL_motioncorrection_mcflirt {
+# This function will perform motion correction on ASL timeseries files using MCFLIRT
+
+##### MAIN OUTPUT ######
+# Motion corrected ASL timeseries file
+
+###########################
+##### MCFLIRT options #####
+# Allowing the user to choose the reference volume for MCFLIRT
+echo
+echo -e "If needed, motion correction will be performed by MCFLIRT tool"
+echo -e "A reference image is needed for motion correction. The DEFAULT is is \"number of volumes / 2\") - registers to (n+1)th volume in series. In other words, \"middle volume # + 1\""
+
+echo
+echo -en "DO you want to (1) use the DEFAULT, or (2) enter another volume to be used as reference? "
+read motion_target_user
+
+while [ 1 ]
+do
+	if [ -n "${motion_target_user}" ] && [ ${motion_target_user} = 1 ]
+	then
+		motion_target_vol_temp="DEFAULT"
+
+		break
+
+	elif [ -n "${motion_target_user}" ] && [ ${motion_target_user} = 2 ]
+	then
+		while [ 1 ]
+		do
+			echo
+			echo -en "Please enter a number between \"0\" and \"Total number of volumes ASL timeseries\" (remember that the target volume will be this number + 1): "
+			read motion_target_vol_temp_user
+
+			if [ -n "${motion_target_vol_temp_user}" ] && [ ${motion_target_vol_temp_user} -ge 0 ] # Checks if this variable is NOT empty, and if it is equal or greater than zero and equal or less than the total number of volumes for this imaging modality entered by the user
+			then
+				echo
+				echo -en "Confirm using this as target volume = \"`echo ${motion_target_vol_temp_user} + 1 | bc`\" ? (y/n) "
+				read yesno
+
+				if [ -n "${yesno}" ] && [ ${yesno} = y ]
+				then
+					##### Entering the value entered by the user into the variable to be used by MCFLIRT #####
+					motion_target_vol=${motion_target_vol_temp_user}
+					################################################################
+
+					# Breaking from the outer loop (using parameter "2" for break). This is enough to get out of both "while" loops
+					break 2
+
+				elif [ -n "${yesno}" ] && [ ${yesno} = n ]
+				then
+					echo
+					echo -en "Please correct the volume to used "
+
+					sleep 2
+				else
+					echo
+					echo -en "Please enter \"y\" or \"n\" only. "
+
+					sleep 2
+				fi
+			else
+				echo
+				echo -en "Not a valid number. Please re-enter another number. "
+
+				sleep 2
+			fi
+		done
+	else
+		echo
+		echo -en "Please enter \"1\" or \"2\" "
+
+		sleep 2
+	fi
+done
+###########################
+
+# Loop to process all subjects
+for SUBJ in ${SUBJLIST}
+do
+	# Collecting relevant files available for this subject.
+	timeseries_folders_list=`ls -d ${asl_mainfolder_path}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}*_${modality_contrast}* 2> /dev/null`
+
+	for timeseries_folder in ${timeseries_folders_list}
+	do
+		# Collecting the TIMESERIES file within each frun folder available for this subject.
+		timeseries_file=`ls ${timeseries_folder}/*_stdMNI.nii.gz 2> /dev/null | sed 's!'${timeseries_folder}/'!!'`
+
+		# Taking the "_orig.nii.gz" from the file name
+		timeseries_file_noextension=`echo ${timeseries_file} | sed 's/.nii.gz//'`
+
+		# Checking if the variable "timeseries_file" has content, i.e., the file name for the timeseries file, AND if all other CHECKS above were ok
+		if [ -n "${timeseries_file}" ]
+		then
+			# Going to /tmp directory to prevent mess in the filesystem
+			cd /tmp
+
+			# Motion target volume - check user's option
+			if [ -n "${motion_target_vol}" ] # Checking if this variable is empty. If empty, user opted to use default value, otherwise he/she pick another value
+			then
+				# User chose a particular volue. Assigning it to a variable with the appropriate parameter format for MCFLIRT
+				motion_ref="-refvol ${motion_target_vol}"
+
+				# Variable to report target volume to be saved in a text file
+				motion_ref_text="target volume used=${motion_target_vol} + 1"
+			else
+				# User chose the DEFAULT. Keeping this variable empty so MCFLIRT uses the DEFAULT value
+				motion_ref=""
+
+				# Variable to report target volume to be saved in a text file
+				motion_ref_text="target volume used=DEFAULT ((n+1)th volume in series)"
+			fi
+
+			###### Collecting into a variable the FSL tool "mcflirt" command to obtain the motion values for this FUNCTIONAL run. Note that the output will be saved within the subject's functional run folder #####
+			echo "mcflirt -in ${timeseries_folder}/${timeseries_file} -out ${timeseries_folder}/${timeseries_file_noextension}_mcf ${motion_ref} &> /dev/null" >> ${temp_folder}/${ppss_command_file}
+			#######################################################################################
+
+			# Putting the reference volume used for MCFLIRT into a file for later retrieval
+			echo `echo ${motion_ref_text}` >  ${timeseries_folder}/mcflirt_refvol_${timeseries_file}_mcf.txt
+
+			##### Creating a LOG file with the MCFLIRT command for later QA if needed #####
+			echo "OS name and version: ${os_nameandversion}; Command: MCFLIRT; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${timeseries_folder}/LOGFILE_mcflirt_mcf_${timeseries_file_noextension}.txt
+
+			echo -e "Command to perform motion correction on ASL timeseries" >> ${timeseries_folder}/LOGFILE_mcflirt_mcf_${timeseries_file_noextension}.txt
+			echo -e "\nmcflirt -in ${timeseries_folder}/${timeseries_file} -out ${timeseries_folder}/${timeseries_file_noextension}_mcf ${motion_ref} &> /dev/null" >> ${timeseries_folder}/LOGFILE_mcflirt_mcf_${timeseries_file_noextension}.txt
+
+		elif [ -z "${timeseries_file}" ] # Warning the user in case this variable is empty
+		then
+			echo
+			echo -e "*** WARNING *** There are no TIMESERIES file in this folder: \"${timeseries_folder}\" ***"
+			echo -e "*** Please check it before re-running this script ***\n"
+
+			echo -en "Press any key to continue "
+			read anykey
+		fi
+	done
+done
+
+############ Routine to call PPSS as needed to run MCFLIRT ##############
+
+# Checking if there is a command file for PPSS to run - if not, it means all functional runs already have MCFLIRT ran thus no need to run it again
+if [ -s ${temp_folder}/${ppss_command_file} ] # Checking if this file exists and it's not empty
+then
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -e "*** No MCFLIRT output files were found for some subjects ***"
+	echo -e "They are needed in order to collect info on head motion\n"
+
+	echo -e "##################################################################"
+	echo -e "Collecting motion parameters for timeseries runs using \"mcflirt\""
+	echo -e "##################################################################"
+
+	# Calling the function "parallel_processing_ppss" to run MCFLIRT motion correction. Note the 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted here. Also note that the user choose before the number of processes to be used in PPSS, so here PPSS will be called without user input.
+	parallel_processing_ppss ${temp_folder} ${ppss_command_file} calling_script
+
+	# Need to delete the PPS file here otherwise this test will be TRUE even though resting BOLD images being processed on the second loop don't need mcflirt
+	rm ${temp_folder}/${ppss_command_file}
+fi
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_ASLmoco # Where the temporary files will be held
+
+# Variable with the name for the ppss command file
+ppss_command_file=ASLmoco_command_list.txt # Basename for the temporary files
+
+asl_mainfolder_path=${SUBJS_FOLDERS_PATH} # Where the subjects folders are. Can be modified by the user in this script.
+
+# Variables to establish imaging modality
+modality_folder_name=rest
+modality_subfolder_name=resting
+modality_contrast=ASL
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+clear
+
+# Changing directory to /tmp in case the script commits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+# Anouncing the purpose of this script
+echo -e "#################################"
+echo -e "##### ASL MOTION CORRECTION #####"
+echo -e "#################################"
+
+##### GATHERING THE PATH TO THE ANALYSIS FOLDER #####
+# FUNCTION CALL: calls the function "analysis_mainfolder" in "mainscrcall_funclib" to allow the user to select the path to the subject's folders
+analysis_mainfolder ASL_original
+
+# Assigning the output variable from the function above to a local variable
+asl_mainfolder_path=${ANALYSIS_MAINFOLDER_PATH}
+######################################################
+
+# Giving instructions to the user
+echo
+echo -e "This script will perform motion correction on ASL timeseries files using MCFLIRT"
+echo -e "It will output a motion corrected ASL timeseries file to be used for processing for perfusion estimation"
+echo -e "This file will have the same name as the original reoriented file with the termination \"_mcf\" instead of \"_stdMNI\""
+
+echo
+echo -en "Press any key to continue processing "
+read -n 1 anykey
+
+# Creating a log file. STEP 1 of 2 = start call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+log_file_scripts_used start "mainscrcall_ASL_motioncorrection:Perform motion correction on ASL timeseries files" FSL "(ASL_motioncorrection_mcflirt) mcflirt"
+
+# FUNCTION CALL: calling the function "ASL_motioncorrection_mcflirt" to perform motion correction on ASL timeseries files using MCFLIRT
+ASL_motioncorrection_mcflirt
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+echo
+echo -e "Processed motion correction for all subjects"
+echo -en "Press any key to continue to the PROCESSING menu "
+read -n 1 anykey
+
+# Removing the temporary folder and its contents
+rm -rf ${temp_folder} 2> /dev/null
+
+# Removing all log files after user input
+rm -r $PPSS_DIR/* 2> /dev/null

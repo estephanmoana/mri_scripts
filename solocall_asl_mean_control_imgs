@@ -1,0 +1,162 @@
+#! /bin/bash
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Creates a mean image from all ASL control images #
+# This script will extract the Lesser Evil data from the raw data text files
+clear
+
+# Going to /tmp to prevent any damage to other files
+cd /tmp
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+# Asking input from the user
+echo -e "This script will compute the mean ASL control image to be used as calibration for processing using BASIL"
+
+# echo
+# echo -en "Please enter the FULL PATH for the raw data files to be processed: "
+# read raw_data_path
+
+raw_data_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/analysis_restingASL/SFN2013/data_abstract/raw_data
+
+
+# echo
+# echo -en "Now enter the FULL PATH where to save the output files: "
+# read output_path
+
+# Giving feedback to the user and asking for confirmation
+echo -e "\n"
+echo -e "Raw data folder is:\n\n${raw_data_path}\n"
+echo -e "These are the folders contained within the raw data folder:\n"
+
+ls -d ${raw_data_path}/* | sed 's!'${raw_data_path}'/!!' | sed "=" | sed 'N; s/\n/) /'
+
+echo
+echo -en "Is this correct? (y to proceed / n to abort): "
+read yesno
+
+if [ ${yesno} = y ] || [ ${yesno} = Y ]
+then
+	echo
+	echo -e "Starting time: `date +"%b %d, %Y. %H:%M:%S %p"`"
+	echo -en "Proceding..."
+else
+	exit
+fi
+
+# Collecting all subjects' folders into a variable
+subjs_folders_list=`ls -d ${raw_data_path}/* | sed 's!'${raw_data_path}'/!!'`
+# subjs_folders_list=FM2465_20130214
+
+for SUBJ in $subjs_folders_list
+do
+	# Entering the subject's control_vols folder
+	cd ${raw_data_path}/${SUBJ}/control_vols
+
+	# Variable to be used in the loop below
+	img_last_ID=""
+
+	# Variable to count how many images are being processed in the loop below. It starts at 1 as the first vol is not counted in the loop below.
+	counter=1
+
+	# Loop to check if volumes belong to the same run, and prepare them for the mean control image calculation using fslmaths
+	for item in `ls *resting0?_*` # "item" here is the restingASL file name
+	do
+		img_ID=`echo $item | awk -F_ '{print $3}'` # The third column is the "resting0X"
+
+		if [ -z "$img_last_ID" ]
+		then # So the above variable is empty, meaning that this is the first volume being processed
+			vol_1st=$item
+
+		elif [ -n "$img_last_ID" ] && [ "$img_last_ID" = "$img_ID" ] # if the variable "img_last_ID" is empty, this is the first volume thus no other volume yet to be added; if it is not empty, it has to be the same type as the current which means they belong to the same run
+		then # The variable "img_last_ID" is not empty, and it has the same value as the variable "img_ID"
+			# Adding this file into the variable below, that has all the additional parameters for adding the images in "fslmaths"
+			remainder_vols="$remainder_vols -add $item"
+
+			# Adding a unit to the variable "counter"
+			((counter++))
+
+		elif [ -n "$img_last_ID" ] && [ "$img_last_ID" != "$img_ID" ] # if the variable "img_last_ID" is empty, this is the first volume thus no other volume yet to be added; if it is not empty, it has to be the same type as the current which means they belong to the same run
+		then # The variable "img_last_ID" is not empty, and it has a different value as the variable "img_ID"
+			# Variable holding the "fslmaths" parameters for the first file list
+			img_ID_1st_run=$img_last_ID # Initial volume for fslmaths command
+			fslmaths_parameters_1st_ASL_run="$vol_1st $remainder_vols" # All additional parameters for fslmaths for 1st run
+			vols_1st_run_counter=$counter # Number of volumes in 1st run
+
+			# Cleaning the contents of the below variables before processing of second run
+			unset vol_1st remainder_vols
+			counter=1 # In this case, it will reset to start counting the volumes for 2nd run
+
+			# This is the first volume of the second file.
+			vol_1st=$item
+		fi
+
+		# Putting the current file being processed as a value for the variable "img_last_ID"
+		img_last_ID=$img_ID
+	done
+
+	# Variables holding the contents to run "fslmaths"
+	img_ID_2nd_run=$img_last_ID # Initial volume for fslmaths command
+	fslmaths_parameters_2nd_ASL_run="$vol_1st $remainder_vols" # All additional parameters for fslmaths for 1st run
+	vols_2nd_run_counter=$counter # Number of volumes in 1st run
+
+	# Cleaning the contents of the below variables before processing of next subject
+	unset vol_1st remainder_vols
+
+	# Commands to run "fslmaths" for the subject being processed. NOTE THAT IT ASSUMES THAT THERE ARE ONLY 2 ASL RUNS
+	echo -e "\n"
+	echo -en "Processing subject \"${SUBJ}\" files "
+
+	# Creating a folder within "control_vols" folder to hold the mean control files
+	mkdir ${raw_data_path}/${SUBJ}/control_vols/mean_imgs
+
+# 	echo -e "\n"
+# 	echo "fslmaths $fslmaths_parameters_1st_ASL_run -div ${vols_1st_run_counter} ${raw_data_path}/${SUBJ}/control_vols/${SUBJ}_${img_ID_1st_run}_control_imgs_mean"
+	fslmaths $fslmaths_parameters_1st_ASL_run -div ${vols_1st_run_counter} ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_1st_run}_control_imgs_mean
+
+# 	echo
+# 	echo "fslmaths $fslmaths_parameters_2nd_ASL_run -div ${vols_2nd_run_counter} ${raw_data_path}/${SUBJ}/control_vols/${SUBJ}_${img_ID_2nd_run}_control_imgs_mean"
+	fslmaths $fslmaths_parameters_2nd_ASL_run -div ${vols_2nd_run_counter} ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_2nd_run}_control_imgs_mean
+
+	# Making copies of the control images mean to later concatenate in 4D
+	# Setting a counter variable
+	count=0
+
+	# Loop to generate copies of the mean control image
+	until [ ${count} -gt ${vols_1st_run_counter} ]
+	do
+		# Adding a unit to this variable
+		((count++))
+
+		# Variable to number the copies
+		counter=`printf "%02d" ${count}`
+
+		# Making copies of the mean of control images
+		cp ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_1st_run}_control_imgs_mean.nii.gz ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_1st_run}_control_imgs_mean_copy_${counter}.nii.gz
+
+		cp ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_2nd_run}_control_imgs_mean.nii.gz ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_2nd_run}_control_imgs_mean_copy_${counter}.nii.gz
+	done
+
+	# Making a 4D file from the copies of the mean of control images
+	fslmerge -t ${raw_data_path}/${SUBJ}/${SUBJ}_${img_ID_1st_run}_control_imgs_mean_calib `ls ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_1st_run}_control_imgs_mean_copy_*.nii.gz`
+
+	fslmerge -t ${raw_data_path}/${SUBJ}/${SUBJ}_${img_ID_2nd_run}_control_imgs_mean_calib `ls ${raw_data_path}/${SUBJ}/control_vols/mean_imgs/${SUBJ}_${img_ID_2nd_run}_control_imgs_mean_copy_*.nii.gz`
+
+	# Going back to the main folder
+	cd ${raw_data_path}
+
+	echo
+	echo -e "Finished processing this subject"
+done
+
+echo -e "\n"
+echo -e "Finished processing all subjects"
+echo
+echo -e "Finishing time: `date +"%b %d, %Y. %H:%M:%S %p"`\n"
+
+# Going back to the main folder
+cd ${raw_data_path}

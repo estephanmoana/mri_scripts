@@ -1,0 +1,587 @@
+#! /bin/bash
+
+# Script to rename the physio monitoring files for all subjects in the FM study collected up to 12/03/2012
+
+clear
+cd /tmp
+
+# Asking user's input
+echo
+echo -en "Please enter the folder where subject(s) folders to be processed are located: "
+read subjects_folders_path
+
+# USE IN CASE OF PROCESSING ONLY SOME OF ALL SUBJECTS WITHIN THE "subjs" FOLDER
+# echo -e "\n"
+# echo -en "Now please enter all the subjects' folders that need to be processed, separated by space: "
+# read subjects_list
+
+# USE IN CASE OF PROCESSING ALL SUBJECTS WITHIN THE "subjs" FOLDER
+subjects_list=`ls -d ${subjects_folders_path}/* | awk -F/ '{print $NF}'`
+
+# Variables with the possible file names
+filename_boldintermingled="INTER inter"
+filename_boldmech="MECH mech"
+filename_boldaud="AUD aud"
+filename_boldsimult="SIMULT simult"
+filename_dti="DTI dti DIFF diff"
+filename_restingBOLD="resting RESTING" # The renaming will result in a filename with "resting" (lower case), so by putting it first here I avoid the loop to present the newly renamed file again to the user
+filename_ASL="ASL asl"
+
+echo
+echo -en "Processing..."
+
+# Variable for total count of mv commands
+process_number_total_boldintermingled=0
+process_number_total_boldmech=0
+process_number_total_boldaud=0
+process_number_total_boldsimult=0
+process_number_total_DTI=0
+process_number_total_restingBOLD=0
+process_number_total_ASL=0
+
+# Variable to hold temp files
+temp_files_folder=/tmp/rename_physiofiles
+
+# mkdir -p ${temp_files_folder} 2> /dev/null
+
+# # File holding the mv commands for conference
+# > ${temp_files_folder}/mv_command_BOLDintermingled.txt
+#
+# # File holding the mv commands for conference
+# > ${temp_files_folder}/mv_command_DTI.txt
+
+# Processing all physio files within the "physio_monitoring" folder
+if [ -n "${subjects_folders_path}" ]
+then
+	cd ${subjects_folders_path}
+
+# 	echo
+# 	ls ${subjects_folders_path}
+	echo
+
+	for item in ${subjects_list} # Looping through each subject's folder
+	do
+		echo
+		echo -e "#######################################################"
+		echo -e "### Processing subject ${item} ###"
+		echo -e "#######################################################\n"
+
+		# Going to the "physio_monitoring" folder
+		cd ${subjects_folders_path}/${item}/physio_monitoring
+
+		########################################################################################################
+		########## Checking the BOLD intermingled files ##########
+		# Variable for numbering the command mv
+		process_number=0
+
+		echo
+		echo -e "*** Processing BOLD intermingled files ***\n"
+
+		for item2 in ${filename_boldintermingled} # Looping through each possible filename ID
+		do
+			orig_name_list=`ls *${item2}* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list}" ]
+			then
+				for item3 in ${orig_name_list} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_boldintermingled=$[10#$process_number_total_boldintermingled + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_BOLD_intermingled.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+			fi
+
+			unset orig_name_list
+		done
+
+		# Asking if use wants to rename the files
+		echo
+		echo -en "Do you want to rename these files? (y/n) "
+		read rename_option
+
+		if [ ${rename_option} = y ]
+		then
+			bash -c "${rename_command}"
+# 			echo "bash -c "${rename_command}""
+		fi
+
+		unset single_command
+		unset rename_command
+		########################################################################################################
+
+		########################################################################################################
+		########## Checking the BOLD mechanical files ##########
+		# Variable for numbering the command mv
+		process_number=0
+
+		echo
+		echo -e "*** Processing BOLD mechanical files ***\n"
+
+		for item2 in ${filename_boldmech} # Looping through each possible filename ID
+		do
+			orig_name_list=`ls *${item2}* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list}" ]
+			then
+				for item3 in ${orig_name_list} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_boldmech=$[10#$process_number_total_boldmech + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_BOLD_mechanical.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+			fi
+
+			unset orig_name_list
+
+		done
+
+		# Asking if use wants to rename the files
+		echo
+		echo -en "Do you want to rename these files? (y/n) "
+		read rename_option
+
+		if [ ${rename_option} = y ]
+		then
+			bash -c "${rename_command}"
+# 			echo "bash -c "${rename_command}""
+		fi
+
+		unset single_command
+		unset rename_command
+		########################################################################################################
+
+		########################################################################################################
+		########## Checking the BOLD auditory files ##########
+		# Variable for numbering the command mv
+		process_number=0
+
+		echo
+		echo -e "*** Processing BOLD auditory files ***\n"
+
+		for item2 in ${filename_boldaud} # Looping through each possible filename ID
+		do
+			orig_name_list=`ls *${item2}* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list}" ]
+			then
+				for item3 in ${orig_name_list} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_boldaud=$[10#$process_number_total_boldaud + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_BOLD_auditory.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+			fi
+
+			unset orig_name_list
+
+		done
+
+		# Asking if use wants to rename the files
+		echo
+		echo -en "Do you want to rename these files? (y/n) "
+		read rename_option
+
+		if [ ${rename_option} = y ]
+		then
+			bash -c "${rename_command}"
+# 			echo "bash -c "${rename_command}""
+		fi
+
+		unset single_command
+		unset rename_command
+		########################################################################################################
+
+		########################################################################################################
+		########## Checking the BOLD simultaneous files ##########
+		# Variable for numbering the command mv
+		process_number=0
+
+		echo
+		echo -e "*** Processing BOLD simultaneous files ***\n"
+
+		for item2 in ${filename_boldsimult} # Looping through each possible filename ID
+		do
+			orig_name_list=`ls *${item2}* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list}" ]
+			then
+				for item3 in ${orig_name_list} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_boldsimult=$[10#$process_number_total_boldsimult + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_BOLD_simultaneous.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+			fi
+
+			unset orig_name_list
+
+		done
+
+		# Asking if use wants to rename the files
+		echo
+		echo -en "Do you want to rename these files? (y/n) "
+		read rename_option
+
+		if [ ${rename_option} = y ]
+		then
+			bash -c "${rename_command}"
+# 			echo "bash -c "${rename_command}""
+		fi
+
+		unset single_command
+		unset rename_command
+		########################################################################################################
+
+		########################################################################################################
+		########## Checking the DWI files ##########
+		# Variable for numbering the command mv
+		process_number=0
+
+		echo
+		echo -e "*** Processing DWI files ***\n"
+
+		for item2 in ${filename_dti} # Looping through each possible filename ID
+		do
+			orig_name_list=`ls *${item2}* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list}" ]
+			then
+				for item3 in ${orig_name_list} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_DTI=$[10#$process_number_total_DTI + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_DWI.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+			fi
+
+			unset orig_name_list
+
+		done
+
+		# Asking if use wants to rename the files
+		echo
+		echo -en "Do you want to rename these files? (y/n) "
+		read rename_option
+
+		if [ ${rename_option} = y ]
+		then
+			bash -c "${rename_command}"
+# 			echo "bash -c "${rename_command}""
+		fi
+
+		unset single_command
+		unset rename_command
+		########################################################################################################
+
+		########################################################################################################
+		########## Checking the resting BOLD files ##########
+		# Variable for numbering the command mv
+		process_number=0
+
+		echo
+		echo -e "*** Processing resting BOLD files ***\n"
+
+		for item2 in ${filename_restingBOLD} # Looping through each possible filename ID
+		do
+			orig_name_list1=`ls *${item2}*1* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list1}" ]
+			then
+				for item3 in ${orig_name_list1} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_restingBOLD=$[10#$process_number_total_restingBOLD + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_restingBOLD01.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+
+				# Asking if use wants to rename the files
+				echo
+				echo -en "Do you want to rename these files? (y/n) "
+				read rename_option
+
+				if [ ${rename_option} = y ]
+				then
+					bash -c "${rename_command}"
+# 					echo "bash -c "${rename_command}""
+				fi
+
+				unset single_command
+				unset rename_command
+			fi
+
+			orig_name_list2=`ls *${item2}*2* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list2}" ]
+			then
+				for item3 in ${orig_name_list2} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_restingBOLD=$[10#$process_number_total_restingBOLD + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_restingBOLD02.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+
+				# Asking if use wants to rename the files
+				echo
+				echo -en "Do you want to rename these files? (y/n) "
+				read rename_option
+
+				if [ ${rename_option} = y ]
+				then
+					bash -c "${rename_command}"
+# 					echo "bash -c "${rename_command}""
+				fi
+
+				unset single_command
+				unset rename_command
+			fi
+
+			unset orig_name_list1
+			unset orig_name_list2
+		done
+		#######################################################################################################
+
+		#######################################################################################################
+		######### Checking the resting ASL files ##########
+		# Variable for numbering the command mv
+		process_number=0
+
+		echo
+		echo -e "*** Processing ASL files ***\n"
+
+		for item2 in ${filename_ASL} # Looping through each possible filename ID
+		do
+			orig_name_list1=`ls *${item2}*1* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list1}" ]
+			then
+				for item3 in ${orig_name_list1} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_ASL=$[10#$process_number_total_ASL + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_ASL01.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+
+				# Asking if use wants to rename the files
+				echo
+				echo -en "Do you want to rename these files? (y/n) "
+				read rename_option
+
+				if [ ${rename_option} = y ]
+				then
+					bash -c "${rename_command}"
+# 					echo "bash -c "${rename_command}""
+				fi
+
+				unset single_command
+				unset rename_command
+			fi
+
+			orig_name_list2=`ls *${item2}*2* 2> /dev/null`
+
+			# Checking if the variables have contents before processing
+			if [ -n "${orig_name_list2}" ]
+			then
+				for item3 in ${orig_name_list2} # Looping through each physio file with the above ID
+				do
+					# Adding a unit to the variable item_number
+					process_number=$[10#$process_number + 1 ]
+
+					# Adding a unit to the variable item_number
+					process_number_total_ASL=$[10#$process_number_total_ASL + 1 ]
+
+					process_number=`printf "%02d" ${process_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+					subjID=`echo ${item3} | awk 'BEGIN {FS="_"} {print $1}'`
+
+					extension=`echo ${item3} | awk 'BEGIN {FS="."} {print $(NF)}'`
+
+					new_name=${subjID}_ASL02.${extension}
+
+					echo
+					echo "${process_number}) mv ${item3} ${new_name}"
+
+					single_command="mv ${item3} ${new_name}"
+
+					rename_command="${single_command}; ${rename_command}"
+				done
+
+				# Asking if use wants to rename the files
+				echo
+				echo -en "Do you want to rename these files? (y/n) "
+				read rename_option
+
+				if [ ${rename_option} = y ]
+				then
+					bash -c "${rename_command}"
+# 					echo "bash -c "${rename_command}""
+				fi
+
+				unset single_command
+				unset rename_command
+			fi
+
+			unset orig_name_list1
+			unset orig_name_list2
+		done
+		#######################################################################################################
+	done
+fi
+
+echo
+echo -e "Total BOLD intermingled mv commands issued = $process_number_total_boldintermingled\n"
+
+echo -e "Total BOLD mechanical mv commands issued = $process_number_total_boldmech\n"
+
+echo -e "Total BOLD auditory mv commands issued = $process_number_total_boldaud\n"
+
+echo -e "Total BOLD simultaneous mv commands issued = $process_number_total_boldsimult\n"
+
+echo -e "Total resting BOLD mv commands issued = $process_number_total_restingBOLD\n"
+
+echo -e "Total DTI mv commands issued = $process_number_total_DTI\n"
+
+echo -e "Total ASL mv commands issued = $process_number_total_ASL"

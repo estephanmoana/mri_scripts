@@ -1,0 +1,112 @@
+#! /bin/bash
+
+# This script will extract the DTI metrics for each subject into a text file exportable to excel
+clear
+
+cd /tmp
+
+# echo
+# echo -en "Please enter the FULL PATH for the raw data files to be processed: "
+# read raw_data_path
+raw_data_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/analysis_restingASL/SFN2013/data_abstract/stats_processed/concatenated_data/stats/raw_stats_output
+
+# echo
+# echo -en "Now enter the FULL PATH where to save the output files: "
+# read output_path
+output_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/analysis_restingASL/SFN2013/data_abstract/stats_processed/concatenated_data/stats/processed_stats_output
+
+echo
+echo -e "Starting time: `date +"%b %d, %Y. %H:%M:%S %p"`"
+echo -en "Processing..."
+
+# Variable with all 60 subjects listed. Same order when run the command "ls" in the directory "/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/analysis_restingASL/SFN2013/data_abstract/raw_data/"
+SUBJ_LIST="FM0001 FM0007 FM0097 FM0530 FM0608 FM0663 FM0757 FM0761 FM0765 FM0770 FM0785 FM0796 FM0797 FM0804 FM0826 FM0833 FM0867 FM1071 FM2001 FM2162 FM2382 FM2383 FM2388 FM2439 FM2443 FM2451 FM2465 FM2473 FM2474 FM2526 HC0002 HC0003 HC0068 HC0102 HC0182 HC0229 HC0249 HC0267 HC0287 HC0293 HC0303 HC0308 HC0436 HC0560 HC0588 HC0610 HC0782 HC0813 HC2054 HC2062 HC2105 HC2106 HC2128 HC2246 HC2277 HC2284 HC2422 HC2436 HC2501 HC2515"
+
+####################### GETTING THE HEADER ITEMS FOR THE OUTPUT FILE #######################
+# Getting the file type listed for all "mean" files into variables to use as headers in the output file
+# metric_name_list1_temp1=`ls ${raw_data_path}/all_*_mean_*.txt | sed 's!'${raw_data_path}'/!!' | awk 'BEGIN {FS="_"} {print $2"_mean"}'`
+#
+# # Substituting the spaces between the metrics into colons for importing to excel to a variable holding the headers for the output file
+# metric_name_list1=`echo ${metric_name_list1_temp1} | sed 's/ /:/g'`
+
+# Getting the DTI metrics listed for the "mask" files to use as headers in the output file
+# for item_fullpath in `ls ${raw_data_path}/all_??_*_mask.txt`
+for item_fullpath in `ls ${raw_data_path}/all_*_mean_*.txt`
+do
+	# Getting only the file name without the path
+	item=`echo ${item_fullpath} | sed 's!'${raw_data_path}'/!!'`
+
+	# Getting info from the output file name into variables
+	file_type=`echo $item | awk 'BEGIN {FS="_"} {print $2}'`
+	roi_name=`echo $item | awk 'BEGIN {FS="_"} {print $5}'`
+
+	# Checking if this a one- or 2-sided ROI
+	if [ "${roi_name}" = Insula ] || [ "${roi_name}" = SI ] || [ "${roi_name}" = SII ] || [ "${roi_name}" = Thalamus ]
+	then
+		roi_side=`echo $item | awk 'BEGIN {FS="_"} {print $6}' | sed 's/.txt//'`
+	else
+		roi_side=none
+	fi
+
+	# Summarizing the data retrieved into a variable
+	metric_roi_side="${file_type}_${roi_name}_${roi_side}"
+
+	# Getting all sumaries for each metric into a variable holding all metrics together to use as headers for the output file
+	metric_roi_side_list="${metric_roi_side_list}:${metric_roi_side}"
+
+	unset metric_roi_side
+done
+
+# Creating the file that will hold all subjects data, and adding the headers to it
+echo "SubjID${metric_roi_side_list}" > ${output_path}/all_subjs_ASL_ROI_means.txt
+
+####################### #######################
+
+####################### GETTING THE DATA FOR EACH SUBJECT AND EXPORTING TO THE OUTPUT FILE #######################
+# Variable to count the subjects being processed. Subjects are listing in the same order as the "ls" command output for the tbss output files. In this case, FM subjects are first in ascending ID order then controls (HC). So 1-18 are FM, 19-36 are HC
+subj_proc_count=0
+
+for subj in ${SUBJ_LIST}
+do
+	# Adding a unit to the subject count
+# 	((subj_proc_count++))
+#
+# 	subj_proc=`printf "%02d" ${subj_proc_count}`
+
+	# Extracting the subject's data for each metric file that was MASKED
+	for item_fullpath in `ls ${raw_data_path}/all_*_mean_*.txt`
+	do
+		# Getting only the file name without the path
+		item=`echo ${item_fullpath} | sed 's!'${raw_data_path}'/!!'`
+
+		# Getting info from the output file name into variables
+		file_type=`echo $item | awk 'BEGIN {FS="_"} {print $2}'`
+		roi_name=`echo $item | awk 'BEGIN {FS="_"} {print $5}'`
+
+		# Extracting the data for the subject being processed
+		for subj_line in `cat ${item_fullpath}`
+		do
+			subjID=`echo ${subj_line} | awk 'BEGIN {FS=":"} {print $1}'`
+
+			if [ ${subjID} = ${subj} ]
+			then
+				metric_value3=`echo ${subj_line} | awk 'BEGIN {FS=":"} {print $2}'`
+			fi
+		done
+
+		# Collecting all metrics from the "mean" MASKED files for this subject into a variable
+		metrics_values3="${metrics_values3}:${metric_value3}"
+	done
+
+	# Getting all metrics for the subject being processed and exporting to the "all_subjects" output file
+	echo "${subj}${metrics_values3}" >> ${output_path}/all_subjs_ASL_ROI_means.txt
+
+	# Cleaning the contents of the below variables
+	unset metrics_values1
+	unset metrics_values2
+	unset metrics_values3
+done
+####################### #######################
+
+echo
+echo -e "Finishing time: `date +"%b %d, %Y. %H:%M:%S %p"`\n"

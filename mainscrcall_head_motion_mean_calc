@@ -1,0 +1,283 @@
+#! /bin/bash
+# Script to retrieve header info from the files for each subject and also extract statistics about each anatomical and functional files
+
+# Sourcing of functions library files #
+. functionslibr_FSL
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+function head_motion_stats {
+# Asking user if all functional runs are to be analyzed, if not he must enter a descriptor for the particular run type
+while [ 1 ]
+do
+	echo
+	echo -e "Enter the descriptor for stimulus type used in the functional runs to be analyzed for head motion, e.g \"Hheat\" or \"pressure_pain\"."
+	echo -e "You can check the descriptors used by looking at the subjects \"func\" folder and what was entered for \"frun0X_stimulus_type(descriptor)\""
+	echo -e "If a subject does not have a functional run for a particular descriptor, it will be flagged accordingly\n"
+
+	echo -en "Enter here the descriptor: "
+	read func_run_descriptor
+
+	echo
+	echo -en "Now enter a TAG that will be used as part of the name of the output file, to be saved in \"${FULLPATH}\". Example =  AO_fMRI: "
+	read all_subjs_filename_tag
+
+	echo
+	echo -e "Descriptor entered: ${func_run_descriptor}\nTag for all subjects file name: ${all_subjs_filename_tag}\n"
+
+	echo -en "Is this correct?(y/n) "
+	read yesno
+
+	if [ ${yesno} = y ] || [ ${yesno} = Y ]
+	then
+		# Tagging the start processing time
+		start_processing=`current_date_time 2`
+
+		# Creating a temporary folder to hold the information
+		mkdir ${temp_folder}/head_motion_temp
+
+		# Creating the FILE that will hold the information collected for ALL SUBJECTS
+		echo -e "Head motion information for the subjects listed" > ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt
+		echo -e "Data gathered in `current_date_time 2` " >> ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt
+		echo -e "\n" >> ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt
+
+		echo -e "::::Average calculated from all valid runs:Average calculated from all valid runs" >> ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt
+		echo -e "SubjectID:Stimulus descriptor:Valid runs:Invalid runs:Mean Motion absolute (mm):Motion relative (mm) - Mean" >> ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt
+
+		for SUBJ in ${SUBJLIST}
+		do
+			echo
+			echo -e "Collecting head motion information for subject \"${SUBJ}\""
+
+			# Getting the DESCRIPTIVE STATS FILE path into a variable. If the files does not exist, the variable will be empty
+			descript_stats_file=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt 2> /dev/null`
+
+			# Checking if the descriptive statistics files were already collected by checking if the variable "descript_stats_file" is empty or not
+			if [ -z "${descript_stats_file}" ] # Checks if this variable is zero in lenght
+			then
+				echo -e "\n"
+				echo -e "No descriptive statistics file was found for subject \"${SUBJ}\""
+				echo -e "Please run option \"1\" or \"3\" in this program to produce the needed files for this subject "
+				sleep 3
+
+				# Putting subjects without descriptive statistics files into a variable
+				subjs_no_descriptstats_file="${subjs_no_descriptstats_file} ${SUBJ}"
+			else
+				# Collecting head motion information for this subject
+				for descriptor in "${func_run_descriptor}"
+				do
+					# Checking if a functional run is valid or not, based on its folder name containing "_INVALID" or not
+					funcrun_list_temp=`ls -1d ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/frun??_* | sed "s!${SUBJS_FOLDERS_PATH}/${SUBJ}/func/!!" | grep ${descriptor}` #### This only depends on renaming the folders, there is no need to collect again the descriptive statistics after renaming the folders with invalid runs
+
+					# Separating valid and invalid runs
+					for item in ${funcrun_list_temp}
+					do
+						# Checking if a run is valid or not - if not, adding it to the variable below
+						invalid=`echo ${item} | grep _INVALID`
+
+						#Adding invalid runs, if any, to a variable
+						func_run_invalid="${func_run_invalid} ${invalid}"
+					done
+
+					# This parameter substitution will remove invalid runs from the variable funcrun_list
+					for item in ${func_run_invalid}
+					do
+						funcrun_list_temp=${funcrun_list_temp/$item/}
+					done
+
+					# This is needed to remove spaces from the contents of variable "funcrun_list_temp", so that the test to check if the variable "funcrun_list" is non-zero in lenght can work apropriately
+					funcrun_list=`echo ${funcrun_list_temp}`
+
+					# Creating the SUBJECT file and adding a header for it
+					echo -e "SubjectID:Image type:Motion absolute (mm) - Mean:Std Dev:Median:Min:Max:Motion relative (mm) - Mean:Std Dev:Median:Min:Max:" > ${temp_folder}/head_motion_temp/${SUBJ}_head_motion_${descriptor}.txt
+
+					# Checking if there is content to the variable "head_motion_variable". This avoids entering an empty line when a subject from the subjects list does not have a particular functional run type
+					if [ -z "${funcrun_list}" ] # Checks if this variable is zero in lenght
+					then
+						echo -e "No functional run for this descriptor ${descriptor}" >> ${temp_folder}/head_motion_temp/${SUBJ}_head_motion_${descriptor}.txt
+
+						# Variable to check if there is a functional run for this descriptor
+						func_run_exist_descriptor=no
+					else
+						# Variable to check if there is a functional run for this descriptor
+						func_run_exist_descriptor=yes
+
+						# Collecting the information into a variable
+						for item in ${funcrun_list}
+						do
+							###### ***** NEED TO CHECK THE AWK files to be gathered - they may be incorrect after the update to scripts ******* ###
+							grep ${item} ${descript_stats_file} | awk  'BEGIN {FS=":"; OFS=":"} {print $1,$2,$16,$17,$18,$19,$21,$23,$24,$25,$26,$28}' >> ${temp_folder}/head_motion_temp/${SUBJ}_head_motion_${descriptor}.txt
+						done
+					fi
+
+					# Gathering the information for the file for ALL SUBJECTS INFO
+					# Calculating mean of mean head motion - In case subjects have more than one functional run of a specific type
+					mean_motion_absolute=`grep frun ${temp_folder}/head_motion_temp/${SUBJ}_head_motion_${descriptor}.txt | awk -F : '{print $3}'` # Note that that awk uses the field for files in the /tmp folder, which are different from the ones used for the variable "head_motion_variable"
+					mean_motion_relative=`grep frun ${temp_folder}/head_motion_temp/${SUBJ}_head_motion_${descriptor}.txt | awk -F : '{print $8}'`
+
+					# Counting the number of invalid runs
+					fruns_count_invalid=0
+
+					for item in `echo $func_run_invalid`
+					do
+						fruns_count_invalid=$[ $fruns_count_invalid + 1 ]
+					done
+
+					# Counting the number of valid runs
+					fruns_count_valid=0
+
+					for item in `echo $mean_motion_absolute`
+					do
+						fruns_count_valid=$[ $fruns_count_valid + 1 ]
+					done
+
+					# Checking if there is more than one run. If not, will use the single run value
+					if [ "$fruns_count_valid" -gt 1 ]
+					then
+						# Mean ABSOLUTE head motion
+						fruns_head_motion_absolute_sum=`echo ${mean_motion_absolute} | sed 's/ /+/g'` ## Here sed can substitute spaces by plus signs. Note the use of the "bc" comand, which is the bash calculator
+						fruns_head_motion_absolute_mean=`echo " scale=6; ($fruns_head_motion_absolute_sum) / ${fruns_count_valid}" | bc`
+
+						# Mean RELATIVE head motion
+						fruns_head_motion_relative_sum=`echo ${mean_motion_relative} | sed 's/ /+/g'` ## Here sed can substitute spaces by plus signs. Note the use of the "bc" comand, which is the bash calculator
+						fruns_head_motion_relative_mean=`echo " scale=6; ($fruns_head_motion_relative_sum) / ${fruns_count_valid}" | bc`
+					else
+						fruns_head_motion_absolute_mean="${mean_motion_absolute}"
+						fruns_head_motion_relative_mean="${mean_motion_relative}"
+					fi
+
+					# Adding info to the all subjects file
+					# The "if" statement will check if there is a functional run for the descriptor
+					if [ ${func_run_exist_descriptor} = yes ] # If this variable is different than "no", then there functional run(s) with this descriptor
+					then
+						echo -e "${SUBJ}:${descriptor}:${fruns_count_valid}:${fruns_count_invalid}:${fruns_head_motion_absolute_mean}:${fruns_head_motion_relative_mean}" >> ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt
+					elif [ ${func_run_exist_descriptor} = no ]
+					then
+						echo -en
+						echo -e "${SUBJ}:${descriptor}:${fruns_count_valid}:${fruns_count_invalid}:No functional run for this descriptor:No functional run for this descriptor:" >> ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt
+					fi
+
+					# Cleaning the contents of the variable "func_run_valid"
+					unset func_run_valid
+					unset func_run_invalid
+				done
+
+				# Cleaning the contents for the variable "func_run_exist_descriptor"
+				unset func_run_exist_descriptor
+			fi
+		done
+
+		break
+	else
+		echo
+		echo -e "Please correct the information entered"
+		echo -en "Press any key to continue "
+		read -n 1 anykey
+	fi
+done
+
+####### NEED TO DEVELOP A WAY FOR USER TO INDICATE WHERE TO SAVE THIS FILE
+# Getting the current date and time to tag the output file
+current_date_time_filename_tag=`current_date_time 1`
+
+# Moving file with all subjects info to the main folder for the analysis
+cp ${temp_folder}/head_motion_temp/head_motion_all_subjects_${all_subjs_filename_tag}.txt ${FULLPATH}/head_motion_all_subjects_${all_subjs_filename_tag}_${current_date_time_filename_tag}.txt
+
+# Giving feedback to the user
+echo
+echo -e "Processed al subjects listed here: ${SUBJLIST}\n"
+
+# Checking if any subjects were skipped due to no descriptive statistics file, and letting the user know
+if [ -n "${subjs_no_descriptstats_file}" ]
+then
+	echo -e "And these subjects, had no descriptive statistics file: ${subjs_no_descriptstats_file}"
+	echo -e "You need to collect it using option \"3\" of this program\n"
+fi
+
+echo -e "Individual files for each subject can be found in the subject's folder within \"${FULLPATH}/subjs\"\n"
+echo -e "And head motion information for all subjects are entered in a single file located here: ${FULLPATH}"
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### PARAMETERS PASSED ON WHEN CALLING THIS SCRIPT #####
+function_to_use="$1"
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir # Where the temporary files will be held
+command_file=subject_motion_parameters # Basename for the temporary files
+######################################################################
+
+# Creating a log file. STEP 1 of 2 = start call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+log_file_scripts_used start "header_info_QA:Head motion summary statistics for all subjects (extracted from the subject's descriptive stats files)" none "none"
+
+echo -e "\n\n"
+echo -e "Extracting head motion summary statistics for all subjects (extracted from the subject's descriptive stats files)"
+echo -e "This will summarize the head motion information during FUNCTIONAL runs from descriptive statistics files previously run using one of the options above"
+echo -e "########### Please be sure that you have produce these files before running the present script ###########\n"
+
+echo -e "########################################################################################################################"
+echo -e "Of note, you should check if the functional run(s) for each subject is valid or not due to head motion, incomplete run, etc.\n"
+
+echo -e "#### IMPORTANT: If a functional run is not valid, you should name its folder within the \"subjID/func\" folder as \"frunXX_stimtype_INVALID\ #####\n"
+
+echo -e "This is necessary for this program to function properly"
+echo -e "########################################################################################################################\n"
+
+echo -en "Press any key to continue "
+read -n 1 anykey
+
+# Calling function "descript_stats_outputfile" to collect descriptive statistics on the image files
+head_motion_stats
+
+# Tagging the end processing time
+finish_processing=`current_date_time 2`
+
+echo
+echo -e "Done collecting head motion for FUNCTIONAL files\n"
+
+echo -e "To load the output files into a spreadsheet like Excel, use the option \"Import text files\""
+echo -e "For text files contaning \"descriptive statistics\", use \"separated by colon\"\n"
+
+# Giving feedback to the user of the processing time
+echo -e "Start time was: ${start_processing}"
+echo -e "Finish time was: ${finish_processing}\n"
+
+# Giving the option to the user to look at the temporary files created before erasing them
+cd /tmp
+
+echo -e "\n"
+echo -e "\tIf you want to look at the temporary files created in this folder: ${temp_folder}"
+echo -e "\tPlease do so before continuing \n"
+
+echo -e "\tOtherwise, all files will be erased as soon as you press any key to continue\n"
+
+echo
+echo -en "Press any key to continue to the PROCESSING menu "
+read -n1 anykey
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"

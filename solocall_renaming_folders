@@ -1,0 +1,20 @@
+#! /bin/bash
+
+echo -en "Enter absolute path for the folder containing the files/folders to be renamed: "
+read files_path
+
+cd $files_path
+
+folders_list=`ls $files_path`
+
+for item in $folders_list
+do
+	#echo $item|sed 's/^20......_//'
+
+	ID=`echo $item | sed 's/^20......_//'` # The caret sign (^) signifies that the pattern must be in the beginning, and each dot is a character (equivalent of "?")
+	SCANDATE=`echo $item | sed 's/_....$//'` # The dollar sign ($) signifies that the pattern must be in the end, and each dot is a character (equivalent of "?")
+#	echo ${ID}
+#	echo
+#	echo ${SCANDATE}
+	mv $item ${ID}_${SCANDATE}
+done

@@ -1,0 +1,316 @@
+#! /bin/bash
+
+# Quick and dirty script to get stats from images #
+
+clear
+
+while [ 1 ]
+do
+	# Getting the absolute path for images
+	echo
+	echo -e "This script will retrieve descriptive statistics from \"thresh_zstat\" images"
+	echo -e "Specifically, the minimum and maximum voxel intensity values and number of voxels in the selected images"
+
+	echo
+	echo -en "Please enter the ABSOLUTE path for the folder (i.e. XXX.gfeat) holding the images of interest (usually something like \"absolute_path/2nd_level/\", where \"thresh_zstatX.nii.gz\" files will reside): "
+	read images_path
+
+	echo
+	echo -en "Now enter where the output file will be saved: "
+	read output_file_path
+
+	echo
+	echo -en "Now provide a basename for the output file: "
+	read outputfile_name
+
+	echo
+	echo -e "These are the folders holding the thresholded images to be processed:"
+
+	echo
+	ls -d ${images_path} | sed 's!'${images_path}/'!!'
+
+	# Getting contrast names from the design.fsf file
+	gfeat_folder=${images_path}
+
+	# Saving the contrasts to a file
+	# First removing any previous file that were not deleted
+	# Removing the temporary file with the contrast names
+	rm /tmp/image_stats_contrast_names_temp.txt 2> /dev/null
+
+	cat ${gfeat_folder}/design.fsf | sed -n 's!set fmri(conname_real.!thresh_zstat!p' | sed 's!)!!g' | sed 's!"!!g' | sed 's! !_!g' > /tmp/image_stats_contrast_names_temp.txt
+
+	echo
+	echo -e "These are the contrast names:"
+	cat /tmp/image_stats_contrast_names_temp.txt
+
+	echo
+	echo -en "Enter here the thresholded images to be used using ONLY their respective NUMBERS (if you want ALL of them, just enter \"all\"): "
+	read thresh_images_numbers_chosen
+
+	echo
+	echo -en "Do you want to use a lower threshold for the output (i.e., so only voxel values above your cluster-forming theshold are used (Z=2.3))?(y/n) "
+	read lower_thresh_use
+
+	# Collecting lower threshold info if used decided to use it
+	if [ "$lower_thresh_use" = y ] || [ "$lower_thresh_use" = Y ]
+	then
+		echo
+		echo -en "Please enter the desired lower threshold (suggestion: use the cluster-forming threshold for your analysis): "
+		read lower_thresh
+	fi
+
+	echo
+	echo -e "These are the entered thresholded images files:\n"
+
+	if [ "$thresh_images_numbers_chosen" = all ] || [ "$thresh_images_numbers_chosen" = ALL ]
+	then
+		# Variable to assign cope numbering to "all"
+		thresh_images_all=yes
+
+		thresh_images_number=1
+
+		for item in `ls ${images_path}/thresh_zstat*.nii.gz`
+		do
+			echo thresh_zstat${thresh_images_number}.nii.gz
+
+			thresh_images_number=$[ $thresh_images_number + 1 ]
+		done
+	else
+		# Variable to assign cope numbering to "all"
+		thresh_images_all=no
+
+		for thresh_images_number in ${thresh_images_numbers_chosen}
+		do
+			echo thresh_zstat${thresh_images_number}.nii.gz
+		done
+	fi
+
+	echo
+	echo -e "This is the path for the output file: ${output_file_path}\n"
+
+	echo -e "And its name: images_stats_${outputfile_name}.txt"
+
+	# Presenting the lower threshold to user if entered
+	if [ "$lower_thresh_use" = y ] || [ "$lower_thresh_use" = Y ]
+	then
+		# Transforming the content of the variable to the word yes
+		lower_thresh_use=yes
+
+		echo
+		echo -e "Lower threshold to be used: ${lower_thresh}"
+	else
+		# Transforming the content of the variable to the word no
+		lower_thresh_use=no
+		echo
+		echo -e "No lower threshold entered for output statistics"
+	fi
+
+	echo -e "\n"
+	echo -en "Is this correct?(y/n) "
+	read yesno
+
+	case ${yesno} in
+	Y | y)
+
+		# Giving info to the user
+		echo
+		echo -en "Calculating requested statistics..."
+
+		# Creating a variable to timestamp the output file
+		timestamp_outputfile=`date +"%Y%b%d_%H_%M%p"`
+
+		# Creating the text file to hold the results
+		echo -e "Statistics for the images below" > ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+		echo -e "Collected in `date +"%Y%b%d, %H:%M %p"`" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+		echo -e "\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+		echo -e "Absolute path for the images analyzed: ${images_path}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+		# Adding a line to the output file
+		echo -e "\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+		if [ ${thresh_images_all} = yes ]
+		then
+			thresh_images_number=1
+
+			for item_absolute_path in `ls ${images_path}/thresh_zstat*.nii.gz`
+			do
+				# Extracting the path from the file name
+				item=`echo ${item_absolute_path} | sed 's!${images_path}/!!'` | sed 's!.nii.gz!!'
+
+				# Entering the image being analyzed
+				echo -e "IMAGE: ${item}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+				# Getting the contrast name for the image being processed
+				thresh_image_stimname=`cat /tmp/image_stats_contrast_names_temp.txt | grep "${item}_" | sed 's! !_!' | sed "s/${item}_//"`
+
+				# Entering the contrast name for the image being analyzed
+				echo -e "CONTRAST NAME: ${thresh_image_stimname}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+				############### COLLECTING STATISTICS FOR THE IMAGES CHOSEN #####################
+				# Checking if user is using a lower threshold
+				if [ "$lower_thresh_use" = yes ] || [ "$lower_thresh_use" = YES ]
+				then
+					# MIN/MAX intensity
+					min_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -R 2> /dev/null | awk '{print $1}'`
+					max_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -R 2> /dev/null | awk '{print $2}'`
+
+					# MIN/MAX robust intensity
+					min_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -r 2> /dev/null | awk '{print $1}'`
+					max_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -r 2> /dev/null | awk '{print $2}'`
+
+					# Number of ALL VOXELS
+					voxels_number=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $1}'`
+					volume_allvoxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $2}'`
+
+					# Number of NON-ZERO VOXELS
+					voxels_number_nonzero=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $1}'`
+					volume_nonzero_voxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $2}'`
+
+					# Adding the stats to the output file
+					echo -e "Lower threshold used in fslstats command = ${lower_thresh}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Minimal intensity: ${min_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal intensity: ${max_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Minimal robust intensity: ${min_robust_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal robust intensity: ${max_robust_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of all voxels: ${voxels_number}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of all voxels: ${volume_allvoxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of non-zero voxels: ${voxels_number_nonzero}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of non-zero voxels: ${volume_nonzero_voxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+				else
+					# MIN/MAX intensity
+					min_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -R | awk '{print $1}'`
+					max_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -R | awk '{print $2}'`
+
+					# MIN/MAX robust intensity
+					min_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -r | awk '{print $1}'`
+					max_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -r | awk '{print $2}'`
+
+					# Number of ALL VOXELS
+					voxels_number=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $1}'`
+					volume_allvoxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $2}'`
+
+					# Number of NON-ZERO VOXELS
+					voxels_number_nonzero=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $1}'`
+					volume_nonzero_voxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $2}'`
+
+					# Adding the stats to the output file
+					echo -e "No lower threshold used in fslstats command\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Minimal intensity: ${min_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal intensity: ${max_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Minimal robust intensity: ${min_robust_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal robust intensity: ${max_robust_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of all voxels: ${voxels_number}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of all voxels: ${volume_allvoxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of non-zero voxels: ${voxels_number_nonzero}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of non-zero voxels: ${volume_nonzero_voxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+				fi
+
+				thresh_images_number=$[ $thresh_images_number + 1 ]
+			done
+		elif [ ${thresh_images_all} = no ]
+		then
+			for thresh_images_number in ${thresh_images_numbers_chosen}
+			do
+				# Entering the image being analyzed
+				echo -e "IMAGE: thresh_zstat${thresh_images_number}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+				# Getting the contrast name for the image being processed
+				thresh_image_stimname=`cat /tmp/image_stats_contrast_names_temp.txt | grep "thresh_zstat${thresh_images_number}_" | sed 's! !_!' | sed "s/thresh_zstat${thresh_images_number}_//"`
+
+				# Entering the contrast name for the image being analyzed
+				echo -e "CONTRAST NAME: ${thresh_image_stimname}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+				############### COLLECTING STATISTICS FOR THE IMAGES CHOSEN #####################
+				# Checking if user is using a lower threshold
+				if [ "$lower_thresh_use" = yes ] || [ "$lower_thresh_use" = YES ]
+				then
+					# MIN/MAX intensity
+					min_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -R 2> /dev/null | awk '{print $1}'`
+					max_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -R 2> /dev/null | awk '{print $2}'`
+
+					# MIN/MAX robust intensity
+					min_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -r 2> /dev/null | awk '{print $1}'`
+					max_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -r 2> /dev/null | awk '{print $2}'`
+
+					# Number of ALL VOXELS
+					voxels_number=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $1}'`
+					volume_allvoxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $2}'`
+
+					# Number of NON-ZERO VOXELS
+					voxels_number_nonzero=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $1}'`
+					volume_nonzero_voxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $2}'`
+
+					# Adding the stats to the output file
+					echo -e "Lower threshold used in fslstats command = ${lower_thresh}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Minimal intensity: ${min_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal intensity: ${max_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Minimal robust intensity: ${min_robust_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal robust intensity: ${max_robust_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of all voxels: ${voxels_number}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of all voxels: ${volume_allvoxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of non-zero voxels: ${voxels_number_nonzero}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of non-zero voxels: ${volume_nonzero_voxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+				else
+					# MIN/MAX intensity
+					min_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -R | awk '{print $1}'`
+					max_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -R | awk '{print $2}'`
+
+					# MIN/MAX robust intensity
+					min_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -r | awk '{print $1}'`
+					max_robust_intensity=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -r | awk '{print $2}'`
+
+					# Number of ALL VOXELS
+					voxels_number=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $1}'`
+					volume_allvoxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -V 2> /dev/null | awk '{print $2}'`
+
+					# Number of NON-ZERO VOXELS
+					voxels_number_nonzero=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $1}'`
+					volume_nonzero_voxels=`fslstats ${images_path}/thresh_zstat${thresh_images_number}.nii.gz -l ${lower_thresh} -v 2> /dev/null | awk '{print $2}'`
+
+					# Adding the stats to the output file
+					echo -e "No lower threshold used in fslstats command\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Minimal intensity: ${min_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal intensity: ${max_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Minimal robust intensity: ${min_robust_intensity}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Maximal robust intensity: ${max_robust_intensity}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of all voxels: ${voxels_number}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of all voxels: ${volume_allvoxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+
+					echo -e "Number of non-zero voxels: ${voxels_number_nonzero}" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+					echo -e "Volume of non-zero voxels: ${volume_nonzero_voxels}\n" >> ${output_file_path}/images_stats_${outputfile_name}_${timestamp_outputfile}.txt
+				fi
+			done
+		fi
+
+		# Removing the temporary file with the contrast names
+		rm /tmp/image_stats_contrast_names_temp.txt
+
+		# Giving feedback to the user
+		echo
+		echo -e "Done with calculations - exiting "
+		echo
+
+		break ;;
+	N | n)
+		echo -en "Please correct the information entered "
+		sleep 2 ;;
+	*)
+		echo -en "No valid option chosen " ;;
+	esac
+done

@@ -1,0 +1,264 @@
+#! /bin/bash
+
+# This script will extract the DTI metrics for each subject into a text file exportable to excel
+clear
+
+cd /tmp
+
+##### VARIABLES TO BE USED IN THIS SCRIPT #####
+# Variables with the full path to the raw data files. NEED TO COMMENT and UNCOMMENT THE VARIABLES NOT USED AND TO BE USED, RESPECTIVELY.
+# rawdata_wholebrain_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/UNC_computing_cluster_files/analysis_DWI_mainfolder/tbss_mainfolder/data_extraction/wholebrain
+
+# rawdata_ROI_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/UNC_computing_cluster_files/analysis_DWI_mainfolder/tbss_mainfolder/data_extraction/ROI
+
+# Input path for STREAM 1
+rawdata_ROI_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/UNC_computing_cluster_files/analysis_DWI_mainfolder/tbss_mainfolder/data_extraction/ROI/Stream1_distortion-correctedYES_minusY/Manuscript_DTI
+
+# # Input path for STREAM 2
+# rawdata_ROI_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/UNC_computing_cluster_files/analysis_DWI_mainfolder/tbss_mainfolder/data_extraction/ROI/Stream2_distortion-correctedNO/Manuscript_DTI
+
+########
+
+# Variable with full path to the output folder
+# output_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/UNC_computing_cluster_files/analysis_DWI_mainfolder/tbss_mainfolder/data_extraction
+
+# Output path for STREAM 1
+output_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/UNC_computing_cluster_files/analysis_DWI_mainfolder/tbss_mainfolder/data_extraction/SUMMARY/Stream1_distortion-correctedYES_minusY/Manuscript_DTI
+
+# # Output path for STREAM 2
+# output_path=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/UNC_computing_cluster_files/analysis_DWI_mainfolder/tbss_mainfolder/data_extraction/SUMMARY/Stream2_distortion-correctedNO/Manuscript_DTI
+
+# Variable with all 60 subjects listed. Same order when run the command "ls" in the directory "/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/analysis_DTI_tbss/APS2013/data_poster/raw_data"
+SUBJ_LIST="FM0001 FM0007 FM0097 FM0530 FM0608 FM0663 FM0757 FM0761 FM0765 FM0770 FM0785 FM0796 FM0797 FM0804 FM0826 FM0833 FM0867 FM1071 FM2001 FM2162 FM2382 FM2383 FM2388 FM2439 FM2443 FM2451 FM2465 FM2473 FM2474 FM2526 HC0002 HC0003 HC0068 HC0102 HC0182 HC0229 HC0249 HC0267 HC0287 HC0293 HC0303 HC0308 HC0436 HC0560 HC0588 HC0610 HC0782 HC0813 HC2054 HC2062 HC2105 HC2106 HC2128 HC2246 HC2277 HC2284 HC2422 HC2436 HC2501 HC2515"
+
+# # Variable with the DTI metrics to be processed
+# # For STREAM 1
+# metric_list_wholebrain="FA AD RD MD MO"
+# metric_list_wholebrain_skeletonised="FA AD RD MD MO F1-x F2-x"
+
+# For STREAM 1 for non-FA metrics multiplied by 10,000 to avoid rounding errors
+metric_list_wholebrain="AD RD MD"
+metric_list_wholebrain_skeletonised="AD RD MD"
+
+# # For STREAM 2
+# metric_list_wholebrain="FA"
+# metric_list_wholebrain_skeletonised="FA"
+
+# Variable with the ROIs used
+# ROIs_list="Thalamus_L Thalamus_R SI_L SI_R SII_L SII_R Insula_L Insula_R Cingulate-Gyrus-anterior-division_bilateral Inferior-parietal-lobule_L Inferior-parietal-lobule_R"
+
+ROIs_list="HarvardOxford_Thalamus_L HarvardOxford_Thalamus_R Juelich_SI_L_FULL Juelich_SI_R_FULL Juelich_SII_L_FULL Juelich_SII_R_FULL HarvardOxford_Insula_L HarvardOxford_Insula_R HarvardOxford_Cingulate-Gyrus-anterior-division_L HarvardOxford_Cingulate-Gyrus-anterior-division_R Juelich_Inferior-parietal-lobule_L_FULL Juelich_Inferior-parietal-lobule_R_FULL"
+
+################################################
+
+# Giving feedback to the user
+echo
+echo -e "Starting time: `date +"%b %d, %Y. %H:%M:%S %p"`"
+echo -en "Processing..."
+
+####################### GETTING THE DATA FOR EACH SUBJECT AND EXPORTING TO THE OUTPUT FILE #######################
+# Checking what randomise files are being processed
+###### WHOLE BRAIN ######
+if [ -n "${rawdata_wholebrain_path}" ] # if this variable is not empty, then "wholebrain" files are being processed
+then
+	# Loop to create the headers for the WHOLEBRAIN metrics
+	for metric in ${metric_list_wholebrain}
+	do
+		# Variable holding the header for the metric being processed
+		header_value1=wholebrain_${metric}
+
+		# Variable holding all WHOLEBRAIN headers
+		header_value1_list="${header_value1_list}${header_value1}:"
+	done
+
+	# Loop to create the headers for the WHOLEBRAIN SKELETONISED metrics
+	for metric in ${metric_list_wholebrain_skeletonised}
+	do
+		# Variable holding the header for the metric being processed
+		header_value2=wholebrain-skeletonised_${metric}
+
+		# Variable holding all WHOLEBRAIN SKELETONISED headers
+		header_value2_list="${header_value2_list}${header_value2}:"
+	done
+
+	# Creating the output file holding the WHOLEBRAIN non-and-skeletonised extracted data for all subjects
+	echo -e "subjID:${header_value1_list}${header_value2_list}" > ${output_path}/wholebrain_both-non-and-skeleletonised_allsubjs.txt
+
+	# Variable to count the subjects being processed. Subjects are listing in the same order as the "ls" command output for the tbss output files. In this case, FM subjects are first in ascending ID order then controls (HC). So 1-30 are FM, 31-60 are HC)
+	subj_proc_count=0
+
+	# Loop to process all subjects
+	for SUBJ in ${SUBJ_LIST}
+	do
+		# Adding a unit to the subject count
+		((subj_proc_count++))
+
+		subj_proc=${subj_proc_count}
+
+		# Extracting the WHOLEBRAIN DTI data for the subject being processed.
+		# Looping through all metrics, so the output variable has the metrics in the same order as the headers.
+		for metric in ${metric_list_wholebrain}
+		do
+			for item_fullpath in `ls ${rawdata_wholebrain_path}/wholebrain_${metric}_allsubjs.txt`
+			do
+				# Extracting the WHOLEBRAIN NON-SKELETONISED DTI data for the subject being processed. Note the deleting of the first 3 lines, as they have information about how and when the data was collected (and not data per say).
+				for subj_line in `cat ${item_fullpath} | sed '1,3d'`
+				do
+					subj_number=`echo ${subj_line} | awk -F= '{print $1}'`
+
+					if [ ${subj_proc} = ${subj_number} ]
+					then
+						metric_value1=`echo ${subj_line} | awk -F= '{print $2}'`
+					fi
+				done
+
+				# Collecting all metrics from the "mean" files for this subject into a variable
+				metrics_value1_list="${metrics_value1_list}${metric_value1}:"
+			done
+		done
+
+		# Extracting the WHOLEBRAIN SKELETONISED DTI data for the subject being processed.
+		# Looping through all metrics, so the output variable has the metrics in the same order as the headers.
+		for metric in ${metric_list_wholebrain_skeletonised}
+		do
+			for item_fullpath in `ls ${rawdata_wholebrain_path}/wholebrain-skeletonised_${metric}_allsubjs.txt`
+			do
+				# Extracting the WHOLEBRAIN NON-SKELETONISED DTI data for the subject being processed. Note the deleting of the first 3 lines, as they have information about how and when the data was collected (and not data per say).
+				for subj_line in `cat ${item_fullpath} | sed '1,3d'`
+				do
+					subj_number=`echo ${subj_line} | awk -F= '{print $1}'`
+
+					if [ ${subj_proc} = ${subj_number} ]
+					then
+						metric_value2=`echo ${subj_line} | awk -F= '{print $2}'`
+					fi
+				done
+
+				# Collecting all metrics from the "mean" files for this subject into a variable
+				metrics_value2_list="${metrics_value2_list}${metric_value2}:"
+			done
+		done
+
+		# Getting all metrics for the subject being processed and exporting to the "all_subjects" output file
+		echo "${SUBJ}:${metrics_value1_list}${metrics_value2_list}" >> ${output_path}/wholebrain_both-non-and-skeleletonised_allsubjs.txt
+
+		# Cleaning the contents of the below variables
+		unset metrics_value1_list metrics_value2_list
+	done
+####################################
+
+###### ROI ######
+elif [ -n "${rawdata_ROI_path}" ] # if this variable is not empty, then "ROI" files are being processed
+then
+	# Loop to create the headers for the WHOLEBRAIN metrics
+	for metric in ${metric_list_wholebrain}
+	do
+		# Loop to go through all ROIs
+		for roi_mask in ${ROIs_list}
+		do
+			# Variable holding the header for the metric being processed
+			header_value1=${roi_mask}_${metric}
+
+			# Variable holding all WHOLEBRAIN headers
+			header_value1_list="${header_value1_list}${header_value1}:"
+		done
+	done
+
+	# Loop to create the headers for the WHOLEBRAIN SKELETONISED metrics
+	for metric in ${metric_list_wholebrain_skeletonised}
+	do
+		# Loop to go through all ROIs
+		for roi_mask in ${ROIs_list}
+		do
+			# Variable holding the header for the metric being processed
+			header_value2=${roi_mask}-skeletonised_${metric}
+
+			# Variable holding all WHOLEBRAIN SKELETONISED headers
+			header_value2_list="${header_value2_list}${header_value2}:"
+		done
+	done
+
+	# Creating the output file holding the WHOLEBRAIN non-and-skeletonised extracted data for all subjects
+# 	echo -e "subjID:${header_value1_list}${header_value2_list}" > ${output_path}/ROIs_both-non-and-skeleletonised_allsubjs.txt
+	echo -e "subjID:${header_value1_list}${header_value2_list}" > ${output_path}/ROIs_both-non-and-skeleletonised_non-FA-multtenthousand_allsubjs.txt
+
+	# Variable to count the subjects being processed. Subjects are listing in the same order as the "ls" command output for the tbss output files. In this case, FM subjects are first in ascending ID order then controls (HC). So 1-30 are FM, 31-60 are HC)
+	subj_proc_count=0
+
+	for SUBJ in ${SUBJ_LIST}
+	do
+		# Adding a unit to the subject count
+		((subj_proc_count++))
+
+		subj_proc=${subj_proc_count}
+
+		# Extracting the WHOLEBRAIN DTI data for the subject being processed.
+		# Looping through all metrics, so the output variable has the metrics in the same order as the headers.
+		for metric in ${metric_list_wholebrain}
+		do
+			# Loop to go through all ROIs
+			for roi_mask in ${ROIs_list}
+			do
+# 				for item_fullpath in `ls ${rawdata_ROI_path}/roi_*_${roi_mask}*_${metric}_allsubjs.txt`
+# 				for item_fullpath in `ls ${rawdata_ROI_path}/roi_${roi_mask}_${metric}_allsubjs.txt`
+				# For the non-FA metrics multiplied by 10,000
+				for item_fullpath in `ls ${rawdata_ROI_path}/roi_${roi_mask}_${metric}-multtenthousand_allsubjs.txt`
+				do
+					# Extracting the WHOLEBRAIN NON-SKELETONISED DTI data for the subject being processed. Note the deleting of the first 3 lines, as they have information about how and when the data was collected (and not data per say).
+					for subj_line in `cat ${item_fullpath} | sed '1,3d'`
+					do
+						subj_number=`echo ${subj_line} | awk -F= '{print $1}'`
+
+						if [ ${subj_proc} = ${subj_number} ]
+						then
+							metric_value1=`echo ${subj_line} | awk -F= '{print $2}'`
+						fi
+					done
+
+					# Collecting all metrics from the "mean" files for this subject into a variable
+					metrics_value1_list="${metrics_value1_list}${metric_value1}:"
+				done
+			done
+		done
+
+		# Extracting the WHOLEBRAIN SKELETONISED DTI data for the subject being processed.
+		# Looping through all metrics, so the output variable has the metrics in the same order as the headers.
+		for metric in ${metric_list_wholebrain_skeletonised}
+		do
+			# Loop to go through all ROIs
+			for roi_mask in ${ROIs_list}
+			do
+# 				for item_fullpath in `ls ${rawdata_ROI_path}/roi-skeletonised_*_${roi_mask}*_${metric}_allsubjs.txt`
+# 				for item_fullpath in `ls ${rawdata_ROI_path}/roi-skeletonised_${roi_mask}_${metric}_allsubjs.txt`
+				# For the non-FA metrics multiplied by 10,000
+				for item_fullpath in `ls ${rawdata_ROI_path}/roi-skeletonised_${roi_mask}_${metric}-multtenthousand_allsubjs.txt`
+				do
+					# Extracting the WHOLEBRAIN NON-SKELETONISED DTI data for the subject being processed. Note the deleting of the first 3 lines, as they have information about how and when the data was collected (and not data per say).
+					for subj_line in `cat ${item_fullpath} | sed '1,3d'`
+					do
+						subj_number=`echo ${subj_line} | awk -F= '{print $1}'`
+
+						if [ ${subj_proc} = ${subj_number} ]
+						then
+							metric_value2=`echo ${subj_line} | awk -F= '{print $2}'`
+						fi
+					done
+
+					# Collecting all metrics from the "mean" files for this subject into a variable
+					metrics_value2_list="${metrics_value2_list}${metric_value2}:"
+				done
+			done
+		done
+
+		# Getting all metrics for the subject being processed and exporting to the "all_subjects" output file
+# 		echo "${SUBJ}:${metrics_value1_list}${metrics_value2_list}" >> ${output_path}/ROIs_both-non-and-skeleletonised_allsubjs.txt
+		echo -e "${SUBJ}:${metrics_value1_list}${metrics_value2_list}" >> ${output_path}/ROIs_both-non-and-skeleletonised_non-FA-multtenthousand_allsubjs.txt
+
+		# Cleaning the contents of the below variables
+		unset metrics_value1_list metrics_value2_list
+	done
+fi
+##############################################
+
+echo
+echo -e "Finishing time: `date +"%b %d, %Y. %H:%M:%S %p"`\n"

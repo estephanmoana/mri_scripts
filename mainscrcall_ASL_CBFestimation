@@ -1,0 +1,582 @@
+#! /bin/bash
+
+# Calculates the perfusion or cerebral blood flow (CBF) from ASL timeseries #
+# Uses the FSL tool "oxford_asl"
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING FMRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function CBFestimation {
+# This function will collect information from the user and prepared the "oxford_asl" command file for PPSS processing
+
+# Based on the user's initial information, now will gather the parameters for "oxford_asl"
+echo
+echo -e "Gathering the specific parameters for \"oxford_asl\""
+
+##### ASL acquisition type #####
+# This will influence the TI duration: cASL/pcASL TI=Post Label Delay + Labelling duration; pASL=ost Label Delay only (TI is instantaneous)
+
+# Loop for user's entering input
+while [ 1 ]
+do
+	##### ASL acquisition type parameters #####
+	if [ ${acquisition_type} = cASL/pcASL ]
+	then
+		echo
+		echo -en "Enter the total duration for ** Post label delay ** (in seconds): "
+		read postlabeldelay_user
+
+		echo
+		echo -en "Enter the total duration for ** Labelling ** (in seconds): "
+		read labelling_user
+
+		# Variable with the total TI (the sum of both values above)
+		inversion_time_user=`echo "${postlabeldelay_user} + ${labelling_user}" | bc`
+
+		# Assigning the parameter signaling that this is cASL/pcASL to a variable
+		acquisitiontype_parameter="--casl"
+
+		# Assigning the parameter signaling the labelling time to a variable
+		labelling_parameter="--bolus ${labelling_user}"
+
+	elif [ ${acquisition_type} = pASL ]
+	then
+		echo
+		echo -en "Enter the total duration for ** Post label delay ** (in seconds): "
+		read postlabeldelay_user
+
+		# For pASL labelling is instantaneous thus no need to ask the user
+		labelling_user="Not needed"
+
+		# Variable with the total TI (the sum of both values above)
+		inversion_time_user=${postlabeldelay_user}
+
+		# In this case, the variable will be empty (No need to signal acquisition type as "oxford_asl" expects that)
+		acquisitiontype_parameter=""
+
+		# Assigning the parameter signaling the labelling time to a variable
+		labelling_parameter="--bolus value"
+	fi
+	##########################################
+
+	##### STANDARD BRAIN #####
+	if [ ${standardbrain} = alternative_template ]
+	then
+		echo
+		echo -e "Please enter the FULL PATH for the STANDARD BRAIN to be used: "
+		read standardbrain_fullpath_user
+	else
+		standardbrain_fullpath_user=DEFAULT
+	fi
+	##########################
+
+	# Asking user's confirmation of data entered
+	echo
+	echo -e "Information entered:"
+	echo -e "Post label delay (s): ${postlabeldelay_user}"
+	echo -e "Labelling (s): ${labelling_user}"
+	echo -e "Total TI: ${inversion_time_user}"
+	echo -e "Full path to standard brain: ${standardbrain_fullpath_user}"
+
+	echo
+	echo -e "Example \"oxford_asl\" command: oxford_asl -i INPUTfile -o ${asl_output_folder_path}/subjID/CBF_estimation/restingXX --tis ${inversion_time_user} ${labelling_parameter} ${acquisitiontype_parameter} -c CALIBRATIONfile -s ANATOMICALfile -t TRANSFORMATIONMATRIXfile -S StandardBrain(if entered) --regfrom CONTROLVOLSMEANfile  --senscorr --structout --vars --norm --report --spatial --pvcorr"
+
+	echo
+	echo -en "Is this correct? (y/n) "
+	read yesno
+
+	if [ -n "${yesno}" ] && [ ${yesno} = y ]
+	then
+		# Assigning the values for the variables to be used for processing
+		##### Acquisition type #####
+		inversion_time=${inversion_time_user}
+
+		##### Parameters variables names #####
+		# acquisitiontype_parameter
+		# labelling_parameter
+		# Standard brain
+		if [ ${standardbrain_fullpath_user} != DEFAULT ]
+		then
+			standardbrain_fullpat_parameter="-S ${standardbrain_fullpath_user}"
+
+			# Variable holding only the path for standard brain to be use in FLIRT to generate the transformation matrix
+			standardbrain_fullpath=${standardbrain_fullpath_user}
+		else
+			standardbrain_fullpat_parameter=""
+
+			# Variable holding only the path for standard brain to be use in FLIRT to generate the transformation matrix
+			standardbrain_fullpath=${FSLDIR}/data/standard/MNI152_T1_2mm_brain.nii.gz
+		fi
+
+		break
+	else
+		echo
+		echo -en "Please correct the information entered "
+
+		sleep 1
+	fi
+done
+
+# Preparing the "oxford_asl" command and putting it in a file to be processed by PPSS
+for SUBJ in ${SUBJLIST}
+do
+	# Gathering the files available into a variable
+	# INPUT files (Differenced tag-control)
+	inputfile_listed=`ls ${asl_mainfolder_path}/${SUBJ}/${SUBJ}*_diff.nii.gz 2> /dev/null`
+
+	# ANATOMICAL files
+	# Checking the anatomical file chosen by user and listing them
+	if [ ${anat_file_folder} = anat ]
+	then
+		anatfile=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_file_folder}/${SUBJ}_anat_T1_*stdMNI_brain.nii.gz 2> /dev/null`
+
+		# Gathering the anatomical file name to be used with FLIRT to name the transformation matrix
+		anatfile_name=`echo ${anatfile} | awk -F/ '{print $NF}' | sed 's/.nii.gz//'`
+
+	elif [ ${anat_file_folder} = anat/*.anat ]
+	then
+		anatfile=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_file_folder}/T1_biascorr_brain.nii.gz 2> /dev/null`
+
+		# Gathering the anatomical file name to be used with FLIRT to name the transformation matrix
+		anatfile_name=`echo ${anatfile} | awk -F/ '{print $NF}' | sed 's/.nii.gz//'`
+	fi
+
+	# Checking how many ASL timeseries this subject has
+	for item in ${inputfile_listed} # List all files tag-control difference files for the subject
+	do
+		# Extracting just the "resting0X" of the filename
+		ASLrun=`echo ${item} | awk -F/ '{print $NF}' | awk -F_ '{print $3}'`
+
+		ASLtimeseries_runlist="${ASLtimeseries_runlist} ${ASLrun}"
+	done
+
+	# Preparing the "oxford_asl" command parameters
+	# Loop through each ASL timeseries for this subject
+	for item in ${ASLtimeseries_runlist}
+	do
+		##### OUTPUT FOLDERS #####
+		# Creating the output folder for "oxford_asl" output files for each resting ASL run
+		mkdir -p ${asl_output_folder_path}/${SUBJ}/CBF_estimation/${item} 2> /dev/null
+
+		# Storing the OUTPUT folder into a variable
+		output_folder=${asl_output_folder_path}/${SUBJ}/CBF_estimation/${item}
+
+		# Storing the SCREEN OUTPUT folder into a variable
+		screenoutput_file=${asl_output_folder_path}/${SUBJ}/CBF_estimation/${item}/SCREENOUTPUT_oxford_asl_processing_${item}.txt
+		##########################
+
+		##### INPUT FILES #####
+		# Storing the INPUT file into a variable
+		inputfile=`ls ${asl_mainfolder_path}/${SUBJ}/${SUBJ}*_${item}_*diff.nii.gz 2> /dev/null`
+
+		# Variable with the input file name (without the full path) to name the LOG files
+		inputfile_nameonly=`echo ${inputfile} | awk -F/ '{print $NF}'`
+
+		# Storing the CALIBRATION file into a variable
+		calibfile=`ls ${asl_mainfolder_path}/${SUBJ}/${SUBJ}*_${item}_*calib.nii.gz 2> /dev/null`
+
+		# Storing the CONTROL VOLUMES MEAN file into a variable
+		controlvolsmeanfile=`ls ${asl_mainfolder_path}/${SUBJ}/${SUBJ}*_${item}_*ASL_controlvols_mean_brain.nii.gz 2> /dev/null`
+
+		##### GENERATING THE FLIRT COMMAND FOR TRANSFORMATION MATRIX #####
+		echo "flirt -in ${anatfile} -ref ${standardbrain_fullpath} -omat ${output_folder}/${anatfile_name}2std_MNI_T1_2mm_brain.mat" >> ${temp_folder}/${ppss_command_file1}
+
+		# Saving the full path of transformation matrix to be used in "oxford_asl"
+		transformmatrixfile=${output_folder}/${anatfile_name}2std_MNI_T1_2mm_brain.mat
+		##################################################################
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: flirt; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${output_folder}/LOGFILE_CBFestimation_step01_flirt_${inputfile_nameonly}.txt
+
+		echo -e "Command FLIRT to create transformation matrix for anatomical to standard brain" >> ${output_folder}/LOGFILE_CBFestimation_step01_flirt_${inputfile_nameonly}.txt
+
+		echo -e "\nflirt -in ${anatfile} -ref ${standardbrain_fullpath} -omat ${output_folder}/${anatfile_name}2std_MNI_T1_2mm_brain.mat" >> ${output_folder}/LOGFILE_CBFestimation_step01_flirt_${inputfile_nameonly}.txt
+		#####################################
+
+		##### GENERATING THE OXFORD_ASL COMMAND #####
+		echo -e "oxford_asl -i ${inputfile} -o ${output_folder} --tis ${inversion_time} ${labelling_parameter} ${acquisitiontype_parameter} -c ${calibfile} -s ${anatfile} -t ${transformmatrixfile} ${standardbrain_fullpat_parameter} --regfrom ${controlvolsmeanfile} --senscorr --structout --vars --norm --report --spatial --pvcorr &> ${screenoutput_file}" >> ${temp_folder}/${ppss_command_file2}
+		#############################################
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: oxford_asl; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${output_folder}/LOGFILE_CBFestimation_step02_oxford_asl_${inputfile_nameonly}.txt
+
+		echo -e "Command oxford_asl to estimate cerebral blood perfusion" >> ${output_folder}/LOGFILE_CBFestimation_step02_oxford_asl_${inputfile_nameonly}.txt
+
+		echo -e "\noxford_asl -i ${inputfile} -o ${output_folder} --tis ${inversion_time} ${labelling_parameter} ${acquisitiontype_parameter} -c ${calibfile} -s ${anatfile} -t ${transformmatrixfile} ${standardbrain_fullpat_parameter} --regfrom ${controlvolsmeanfile} --senscorr --structout --vars --norm --report --spatial --pvcorr &> ${screenoutput_file}" >> ${output_folder}/LOGFILE_CBFestimation_step02_oxford_asl_${inputfile_nameonly}.txt
+	done
+
+	# Cleaning the contents of the variables below
+	unset ASLtimeseries_runlist
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_ASL-CBFestimation # Where the temporary files will be held
+ppss_command_file1=anatomical_transformationmatrix_flirt_list.txt
+ppss_command_file2=ASL_CBFestimation_list.txt
+
+# Variables to establish imaging modality
+modality_folder_name=rest
+modality_subfolder_name=resting
+modality_contrast=ASL
+
+asl_mainfolder_path=${SUBJS_FOLDERS_PATH} # Where the subjects folders are. Can be modified by the user in this script.
+asl_folder_processed=processed_asl_data # Where the output of ASL-related FSL tools will be saved (within each subjects folder)
+asl_output_folder_path=${asl_mainfolder_path}/${asl_folder_processed}
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+clear
+
+# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+# Anouncing the purpose of this script
+echo -e "###############################################"
+echo -e "##### CEREBRAL BLOOD PERFUSION ESTIMATION #####"
+echo -e "###############################################"
+
+##### GATHERING THE PATH TO THE ANALYSIS FOLDER #####
+# FUNCTION CALL: calls the function "analysis_mainfolder" in "mainscrcall_funclib" to allow the user to select the path to the subject's folders
+analysis_mainfolder ASL_processed
+
+# Assigning the output variable from the function above to a local variable
+asl_mainfolder_path=${ANALYSIS_MAINFOLDER_PATH}
+asl_output_folder_path=${ANALYSIS_MAINFOLDER_PATH}
+######################################################
+
+# Giving instructions to the user
+echo
+echo -e "This program will estimate *** CEREBRAL BLOOD PERFUSION *** in ASL timeseries files"
+
+###### Warning the user about the use of parallel processing with PPSS later on this script #####
+echo
+echo -e "### This script will need to use PPSS to do parallel processing, so please choose the number of parallel processes allowed ###"
+
+# FUNCTION CALL: calling the function "number_processors_RAM_available" to determine how many processors to be used and amount of RAM memory available
+number_processors_RAM_available
+#################################
+
+echo
+echo -e "This processing will be done using the \"asl_file\" tool from FSL"
+echo -e "Some initial information is needed prior to processing. Please choose below:"
+
+# While loop for user input
+while [ 1 ]
+do
+	echo
+	echo -en "\tASL acquisition type is (1) cASL/pcASL or (2) pASL: "
+	read acquisition_type_user
+
+	echo
+	echo -en "\tNumber of inversion time(s) (TI) is (1) SINGLE or (2) MULTI (check ASL pulse sequence): "
+	read singleormultidelay_user
+
+	echo
+	echo -en "\tStandard brain for registration is (1) DEFAULT (MNI_T1_2mm) or (2) Use alternative template: "
+	read standardbrain_user
+
+	echo
+	echo -en "\tFULL PATH for the folder to hold ** OUTPUT ** from \"oxfordasl\" (Hit ENTER for DEFAULT=${asl_output_folder_path}): "
+	read asl_output_folder_path_user
+
+	# FUNCTION CALL: Calling function "path_ANATfiles_processing" in "mainscrcall_funclib" to allow the user to enter the common path to the anatomical files for all subjects being processed
+	path_ANATfiles_processing
+
+	# Translating the user's response into strings
+	# For ASL acquisition type
+	if [ -n "${acquisition_type_user}" ] && [ ${acquisition_type_user} = 1 ]
+	then
+		acquisition_type_user=cASL/pcASL
+
+	elif [ -n "${acquisition_type_user}" ] && [ ${acquisition_type_user} = 2 ]
+	then
+		acquisition_type_user=pASL
+	else
+		acquisition_type_user="not entered"
+	fi
+
+	# For number of inversion time(s)
+	if [ -n "${singleormultidelay_user}" ] && [ ${singleormultidelay_user} = 1 ]
+	then
+		singleormultidelay_user=single-delay
+
+	elif [ -n "${singleormultidelay_user}" ] && [ ${singleormultidelay_user} = 2 ]
+	then
+		singleormultidelay_user=multidelay
+	else
+		singleormultidelay_user="not entered"
+	fi
+
+	# For standard brain
+	if [ -n "${standardbrain_user}" ] && [ ${standardbrain_user} = 1 ]
+	then
+		standardbrain_user=DEFAULT
+
+	elif [ -n "${standardbrain_user}" ] && [ ${standardbrain_user} = 2 ]
+	then
+		standardbrain_user=alternative_template
+	else
+		standardbrain_user="not entered"
+	fi
+
+	# For output folder path
+	if [ -z "${asl_output_folder_path_user}" ]
+	then
+		# In this case, the user hit ENTER thus it will be used the DEFAULT path
+		asl_output_folder_path_user=${asl_output_folder_path}
+	fi
+
+	# Asking user's confirmation of data entered
+	echo -e "\n"
+	echo -e "*** Information entered ***:"
+	echo -e "ASL acquisition type: ${acquisition_type_user}"
+	echo -e "Number of TI(s): ${singleormultidelay_user}"
+	echo -e "Standard brain: ${standardbrain_user}"
+	echo -e "Output folder path: ${asl_output_folder_path_user}"
+	echo -e "Path to the anatomical file: ${SUBJS_FOLDERS_PATH}/subjID/${anat_file_folder}"
+
+	echo
+	echo -en "Is this correct? (y/n) "
+	read yesno
+
+	if [ -n "${yesno}" ] && [ ${yesno} = y ]
+	then
+		##### Assigning the values for the variables to be used for processing #####
+		acquisition_type=${acquisition_type_user}
+		singleormultidelay=${singleormultidelay_user}
+		standardbrain=${standardbrain_user}
+		asl_output_folder_path=${asl_output_folder_path_user}
+		############################################################################
+
+		break
+	else
+		echo
+		echo -en "Please correct the information entered "
+
+		sleep 1
+	fi
+done
+
+while [ 1 ]
+do
+	echo
+	echo -e "\t1. Proceed with estimation of CEREBRAL BLOOD PERFUSION"
+	echo -e "\t0. Back to main menu\n"
+
+	# Ask for user input to continue
+	echo -en "Please enter your option: "
+	read proceed
+
+	case ${proceed} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+		sleep 2
+
+		break
+		;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrcall_ASL_CBFestimation:Estimates cerebral blood perfusion in ASL timeseries" FSL "(CBFestimation) oxford_asl"
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "These are the subjects listed for processing and the respective input and calibration file(s):\n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing the initial subject numbering
+		count=1
+
+		for SUBJ in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo
+			echo -e "###############################"
+			echo "${counter}) ${SUBJ}"
+
+			# Gathering the files available into a variable. Note the use of dots as wildcards for a single character (like "?" in the terminal)
+			# INPUT files (Differenced tag-control)
+			inputfile_listed=`ls ${asl_mainfolder_path}/${SUBJ}/${SUBJ}*_diff.nii.gz 2> /dev/null | sed 's!'${asl_mainfolder_path}/${SUBJ}/'!!g'`
+
+			# CALIBRATION files
+			calibfile_listed=`ls ${asl_mainfolder_path}/${SUBJ}/${SUBJ}*_calib.nii.gz 2> /dev/null | sed 's!'${asl_mainfolder_path}/${SUBJ}/'!!g'`
+
+			# ANATOMICAL files
+			# Checking the anatomical file chosen by user and listing them
+			if [ ${anat_file_folder} = anat ]
+			then
+				anatfile_listed=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_file_folder}/${SUBJ}_anat_T1_*stdMNI_brain.nii.gz 2> /dev/null | awk -F/ '{print $NF}'`
+
+			elif [ ${anat_file_folder} = anat/*.anat ]
+			then
+				anatfile_listed=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_file_folder}/T1_biascorr_brain.nii.gz 2> /dev/null | awk -F/ '{print $NF}'`
+			fi
+
+			# CONTROL VOLUMES MEAN files
+			controlvolsmeanfile_listed=`ls ${asl_mainfolder_path}/${SUBJ}/${SUBJ}*_ASL_controlvols_mean_brain.nii.gz 2> /dev/null | sed 's!'${asl_mainfolder_path}/${SUBJ}/'!!g'`
+
+			# Checking if there are files listed from the above
+			# For INPUT files
+			if [ -n "${inputfile_listed}" ]
+			then
+				echo -e "Input files:\n${inputfile_listed}"
+			else
+				echo -e "Input files: *** NONE FOUND ***"
+			fi
+
+			# For CALIBRATION files
+			if [ -n "${calibfile_listed}" ]
+			then
+				echo
+				echo -e "Calibration files:\n${calibfile_listed}"
+			else
+				echo
+				echo -e "Calibration files: *** NONE FOUND ***"
+			fi
+
+			# For ANATOMICAL files
+			if [ -n "${anatfile_listed}" ]
+			then
+				echo
+				echo -e "Anatomical file:\n${anatfile_listed}"
+			else
+				echo
+				echo -e "Anatomical file: *** NONE FOUND ***"
+			fi
+
+			# For CONTROL VOLUMES MEAN files
+			if [ -n "${controlvolsmeanfile_listed}" ]
+			then
+				echo
+				echo -e "Control volumes mean file:\n${controlvolsmeanfile_listed}"
+				echo -e "###############################"
+			else
+				echo
+				echo -e "Control volumes mean file: *** NONE FOUND ***"
+				echo -e "###############################"
+			fi
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the variable below
+		unset count counter
+
+		# Warning the user about the script assumptions
+		echo
+		echo -e "*** Please note that this script will need the files listed above ***"
+		echo -e "If they are not correct, you should abort now pressing \"Ctrl + c\""
+		echo -en "Otherwise, press any key to continue "
+		read -n1 anykey
+
+		# Telling the user that processing will start now
+		echo
+		echo -e "### Proceeding with estimation of CEREBRAL BLOOD PERFUSION for all subjects ###"
+
+		# FUNCTION CALL: Calls the function "CBFestimation" to produce a text file with a list of the commands using "asl_file" to be processed by PPSS
+		CBFestimation
+
+		##### PROCESSING OF FLIRT COMMAND #####
+		# Giving feedback to the user
+		echo
+		echo -e "#####################################################################################################"
+		echo -e "### Processing FLIRT command to produce transformation matrices \"ANATOMICAL to STANDARD BRAIN\" ####"
+		echo -en "#####################################################################################################"
+
+		# Checking if there is a PPSS processing file for "ppss_command_file1" to process FLIRT
+		if [ -f "${temp_folder}/${ppss_command_file1}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 4 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run; 3) Signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there; 4) Number of parallel processes to be run (chosen beforehand within this script).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file1} local_script ${number_processors_to_use}
+
+			echo
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+		###########################################
+
+		##### PROCESSING OF "oxford_asl" COMMAND #####
+		# Giving feedback to the user
+		echo
+		echo -e "#######################################################################################################"
+		echo -e "### Processing \"oxford_asl\" command to ESTIMATE CEREBRAL BLOOD PERFUSION in \"ml/100g/min\" units ###"
+		echo -en "#######################################################################################################"
+
+		# Checking if there is a PPSS processing file for "ppss_command_file2" to process OXFORD_ASL
+		if [ -f "${temp_folder}/${ppss_command_file2}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 4 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run; 3) Signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there; 4) Number of parallel processes to be run (chosen beforehand within this script).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file2} local_script ${number_processors_to_use}
+
+			echo
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+		###########################################
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	*)
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+# Removing temporary folders and files created
+rm -r ${temp_folder} 2> /dev/null
+
+# Removing all PPSS log files after user input
+rm -r $PPSS_DIR/*

@@ -1,0 +1,318 @@
+#! /bin/bash
+
+
+######################################################################
+##########		FUNCTIONS USED IN THIS SCRIPT			##########
+######################################################################
+
+function comma_separation {
+# This function will transform a number into a comma-separated number (thousands)
+# This is needed since the command printf "%'d\n" gives an error if the number has a dotfollowed by decimal digits
+
+# It uses a single parameter:
+# 1) The variable holding the number to be transformed
+
+local number_orig="$1"
+
+number_orig_integer=`echo ${number_orig} | awk 'BEGIN {FS="."} {print $1}'`
+number_orig_integer=`printf "%'d\n" $number_orig_integer`
+number_orig_decimal=`echo ${number_orig} | awk 'BEGIN {FS="."} {print $2}'`
+
+# In order to use the oputput of this function, it needs to have the output "expelled" instead of inside a variable
+echo "${number_orig_integer}.${number_orig_decimal}"
+}
+
+function results_query_fsl_anat {
+echo -e "Tissue Volume Quantification from FAST (part of FSL) processing" > ${output_folder}/TissueVolumeQuantification_FSLANAT_${today_date}.txt
+echo -e "Processed in `date +"%b %d, %Y. %Hhr %Mmin %p"`" >> ${output_folder}/TissueVolumeQuantification_FSLANAT_${today_date}.txt
+echo -e "Number of subjects processed = ${subjs_count}" >> ${output_folder}/TissueVolumeQuantification_FSLANAT_${today_date}.txt
+echo -e "Subjects processed list = ${subjs_list_FINAL}\n" >> ${output_folder}/TissueVolumeQuantification_FSLANAT_${today_date}.txt
+
+echo -e "SubjID:Brain vol normalised MNI (mm3):GM vol (mm3): WM vol (mm3): CSF vol (mm3):Brain vol native space (mm3):GM vol (voxel):WM vol (voxel):CSF vol (voxel)" >> ${output_folder}/TissueVolumeQuantification_FSLANAT_${today_date}.txt
+
+# Processing all subjects
+for subj in ${subjs_list}
+do
+	echo
+	echo -en "Processing subject ${subj}..."
+
+	# Getting the brain volume in mm3 data into variables
+	brain_vol_normalised_MNI=`grep normalised ${subjs_main_folder}/${subj}/anat/*.anat/T1_vols.txt | sed 's!Brain volume in mm^3 (normalised to MNI) = !!'`
+	brain_vol_native_space=`grep native/original ${subjs_main_folder}/${subj}/anat/*.anat/T1_vols.txt | sed 's!Brain volume in mm^3 (native/original space) = !!'`
+
+	# Getting the subject's data for tissue types into variables
+	vol_CSF_voxel=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_0.nii.gz -V | awk '{print $1}'`
+	vol_CSF_mm=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_0.nii.gz -V | awk '{print $2}'`
+	mean_CSF=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_0.nii.gz -M`
+
+	vol_GM_voxel=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_1.nii.gz -V | awk '{print $1}'`
+	vol_GM_mm=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_1.nii.gz -V | awk '{print $2}'`
+	mean_GM=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_1.nii.gz -M`
+
+	vol_WM_voxel=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_2.nii.gz -V | awk '{print $1}'`
+	vol_WM_mm=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_2.nii.gz -V | awk '{print $2}'`
+	mean_WM=`fslstats ${subjs_main_folder}/${subj}/anat/*.anat/T1_fast_pve_2.nii.gz -M`
+
+	# Calculating the tissue volume for each tyssue type
+	tissuevol_CSF_voxel=`echo "${mean_CSF} * ${vol_CSF_voxel}" | bc -l`
+	tissuevol_CSF_mm=`echo "${mean_CSF} * ${vol_CSF_mm}" | bc -l`
+
+	tissuevol_GM_voxel=`echo "${mean_GM} * ${vol_GM_voxel}" | bc -l`
+	tissuevol_GM_mm=`echo "${mean_GM} * ${vol_GM_mm}" | bc -l`
+
+	tissuevol_WM_voxel=`echo "${mean_WM} * ${vol_WM_voxel}" | bc -l`
+	tissuevol_WM_mm=`echo "${mean_WM} * ${vol_WM_mm}" | bc -l`
+
+	# Transforming the results found above to be comma separated (thousands) using the function "comma_separation"
+	brain_vol_native_space=`comma_separation ${brain_vol_native_space}`
+	brain_vol_normalised_MNI=`comma_separation ${brain_vol_normalised_MNI}`
+
+	tissuevol_CSF_voxel=`comma_separation ${tissuevol_CSF_voxel}`
+	tissuevol_CSF_mm=`comma_separation ${tissuevol_CSF_mm}`
+
+	tissuevol_GM_voxel=`comma_separation ${tissuevol_GM_voxel}`
+	tissuevol_GM_mm=`comma_separation ${tissuevol_GM_mm}`
+
+	tissuevol_WM_voxel=`comma_separation ${tissuevol_WM_voxel}`
+	tissuevol_WM_mm=`comma_separation ${tissuevol_WM_mm}`
+
+	# Outputing the results for the subject processed into the output file
+	echo -e "${subj}:${brain_vol_normalised_MNI}:${tissuevol_GM_mm}:${tissuevol_WM_mm}:${tissuevol_CSF_mm}:${brain_vol_native_space}:${tissuevol_GM_voxel}:${tissuevol_WM_voxel}:${tissuevol_CSF_voxel}" >> ${output_folder}/TissueVolumeQuantification_FSLANAT_${today_date}.txt
+
+	# Cleaning the contents of variables
+	unset brain_vol_native_space brain_vol_normalised_MNI vol_CSF_voxel vol_CSF_mm mean_CSF vol_GM_voxel vol_GM_mm mean_GM vol_WM_voxel vol_WM_mm mean_WM tissuevol_CSF_voxel tissuevol_CSF_mm tissuevol_GM_voxel tissuevol_GM_mm tissuevol_WM_voxel tissuevol_WM_mm
+done
+
+# Giving feedback to the user
+echo -e "\n\n"
+
+echo -e "Finished processing all subjects listed\n"
+
+echo -e "The results are in the file: TissueVolumeQuantification_FSLANAT_${today_date}.txt"
+echo -e "Within the output folder: ${output_folder}"
+
+echo
+echo -en "Press any key to exit "
+read -n 1 $anykey
+
+exit
+}
+
+function results_query_sienax {
+echo -e "Tissue Volume Quantification from SIENAX (part of FSL) processing" > ${output_folder}/TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt
+echo -e "Processed in `date +"%b %d, %Y. %Hhr %Mmin %p"`" >> ${output_folder}/TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt
+echo -e "Input file for analysis = ${input_sienax}" >> ${output_folder}/TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt
+echo -e "Number of subjects processed = ${subjs_count}" >> ${output_folder}/TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt
+echo -e "Subjects processed list = ${subjs_list_FINAL}\n" >> ${output_folder}/TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt
+
+echo -e "SubjID:NORMALISED VOLs:Total brain vol (mm3):Total GM vol (mm3):Total WM vol (mm3):Peripheral GM vol (mm3):ventricular CSF vol (mm3):UNNORMALISED VOLs:Total brain vol (mm3):Total GM vol (mm3):Total WM vol (mm3):Peripheral GM vol (mm3):ventricular CSF vol (mm3)" >> ${output_folder}/TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt
+
+# Processing all subjects
+for subj in ${subjs_list}
+do
+	echo
+	echo -en "Processing subject ${subj}..."
+
+	# Getting the brain volume in mm3 data into variables
+	brain_vol_normalised=`grep BRAIN ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $2}'`
+	brain_vol_native_space=`grep BRAIN ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $3}'`
+
+	# Getting the subject's data for tissue types into variables
+	total_vol_GM_normalised=`grep GREY ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $2}'`
+	total_vol_GM_native_space=`grep GREY ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $3}'`
+
+	total_vol_WM_normalised=`grep WHITE ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $2}'`
+	total_vol_WM_native_space=`grep WHITE ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $3}'`
+
+	peripheral_vol_GM_normalised=`grep pgrey ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $2}'`
+	peripheral_vol_GM_native_space=`grep pgrey ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $3}'`
+
+	vol_ventCSF_normalised=`grep vcsf ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $2}'`
+	vol_ventCSF_native_space=`grep vcsf ${subjs_main_folder}/${subj}/${path_to_input_files}/report.sienax | awk '{print $3}'`
+
+	# Transforming the results found above to be comma separated (thousands) using the function "comma_separation"
+	brain_vol_normalised=`comma_separation ${brain_vol_normalised}`
+	brain_vol_native_space=`comma_separation ${brain_vol_native_space}`
+
+	total_vol_WM_normalised=`comma_separation ${total_vol_WM_normalised}`
+	total_vol_WM_native_space=`comma_separation ${total_vol_WM_native_space}`
+
+	total_vol_GM_normalised=`comma_separation ${total_vol_GM_normalised}`
+	total_vol_GM_native_space=`comma_separation ${total_vol_GM_native_space}`
+
+	peripheral_vol_GM_normalised=`comma_separation ${peripheral_vol_GM_normalised}`
+	peripheral_vol_GM_native_space=`comma_separation ${peripheral_vol_GM_native_space}`
+
+	vol_ventCSF_normalised=`comma_separation ${vol_ventCSF_normalised}`
+	vol_ventCSF_native_space=`comma_separation ${vol_ventCSF_native_space}`
+
+	# Outputing the results for the subject processed into the output file
+	echo -e "${subj}:NORM:${brain_vol_normalised}:${total_vol_GM_normalised}:${total_vol_WM_normalised}:${peripheral_vol_GM_normalised}:${vol_ventCSF_normalised}:UNNORM:${brain_vol_native_space}:${total_vol_GM_native_space}:${total_vol_WM_native_space}:${peripheral_vol_GM_native_space}:${vol_ventCSF_native_space}" >> ${output_folder}/TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt
+
+	# Cleaning the contents of variables
+	unset brain_vol_normalised total_vol_GM_normalised total_vol_WM_normalised peripheral_vol_GM_normalised vol_ventCSF_normalised brain_vol_native_space total_vol_GM_native_space total_vol_WM_native_space peripheral_vol_GM_native_space vol_ventCSF_native_space
+done
+
+# Giving feedback to the user
+echo -e "\n\n"
+
+echo -e "Finished processing all subjects listed\n"
+
+echo -e "The results are in the file: TissueVolumeQuantification_SIENAX_input_${input_sienax}_${today_date}.txt"
+echo -e "Within the output folder: ${output_folder}"
+
+echo
+echo -en "Press any key to exit "
+read -n 1 $anykey
+
+exit
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+
+# Quick script to perform tissue volume quantification from the output of FAST (part of fsl_anat pipeline)
+
+clear
+
+echo -e "This will extract the results from brain and tissue volume quantification from structural analysis using FSL tools (fsl_anat, SIENAX)"
+
+while [ 1 ]
+do
+	# Asking user input
+	echo
+	echo -e "Choose which results to be queried"
+	echo -e "1) fsl_anat output (partial volume results for CSF, GM and WM)"
+	echo -e "SIENAX output (assumes grey/white matter were segmented separately):"
+	echo -e "2a) Using the T1-weighted image reoriented to the MNI template"
+	echo -e "2b) Using the \"T1_biascorr\" from fsl_anat\n"
+
+	echo -en "Enter here your option: "
+	read query_option
+
+	case ${query_option} in
+		1)
+			# Defining the results to be queried into a variable
+			results_query=output_fsl_anat
+
+			break
+			;;
+		2a)
+			# Defining the results to be queried into a variable
+			results_query=output_sienax
+			input_sienax=T1_stdMNI # Also added to the output file name
+			path_to_input_files=anat/*_sienax
+
+			break
+			;;
+		2b)
+			# Defining the results to be queried into a variable
+			results_query=output_sienax
+			input_sienax=T1_biascorr_fsl_anat # Also added to the output file name
+			path_to_input_files=anat/*.anat/*_sienax
+
+			break
+			;;
+		*)
+			echo
+			echo -en "No valid option chosen "
+
+			sleep 2
+
+			clear
+			;;
+	esac
+done
+
+echo -e "\n"
+echo -en "Enter here the main folder holding all subjects folders: "
+read subjs_main_folder
+
+echo -e "\n"
+echo -en "Enter the folder holding the output file: "
+read output_folder
+
+echo -e "\n"
+echo -e "### Determining which subjects have the anaylisis of interest output folder available ###"
+echo -en "(It assumes that within the subject's \"anat\" folder there is a folder with name ending in \".anat\" (fsl_anat) or \"_sienax\") "
+
+# Getting the list of subjects with an output folder within their "anat" folder, and also how many subjects have it
+# Checking what kind of output to be queried
+if [ ${results_query} = output_fsl_anat ]
+then
+	subjs_list=`ls -d ${subjs_main_folder}/*/anat/*.anat | sed 's!'${subjs_main_folder}/'!!' | sed 's!/anat/.*.anat!!' 2> /dev/null`
+	subjs_count=`ls -d ${subjs_main_folder}/*/anat/*.anat 2> /dev/null | wc -l`
+
+elif [ ${results_query} = output_sienax ]
+then
+	subjs_list=`ls -d ${subjs_main_folder}/*/${path_to_input_files} | sed 's!'${subjs_main_folder}/'!!' | sed 's!/anat/.*.anat/.*_sienax!!' 2> /dev/null` # Note the use of a dot in front of the asterisk in order for "sed" to match any number of characters
+	subjs_count=`ls -d ${subjs_main_folder}/*/${path_to_input_files} 2> /dev/null | wc -l`
+fi
+
+# Giving feedback to the user before proceeding
+echo -e "\n"
+echo -e "Main subjects' folder: ${subjs_main_folder}\n"
+
+echo -e "Folder for the output file: ${output_folder}\n"
+
+echo -e "Number of subjects to be processed: ${subjs_count}"
+echo -e "List of the subjects to be processed:"
+
+# Variable to show the number of subj listed
+subj_number=1
+
+for subj in ${subjs_list}
+do
+	subj_number=`printf "%02d" ${subj_number}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+	echo "${subj_number}) $subj"
+
+	# Adding a unit to the variable item_number
+	subj_number=$[10#$subj_number + 1 ]
+done
+
+while [ 1 ]
+do
+	echo
+	echo -en "If this is correct and you want to proceed, press \"y\" - otherwise press \"n\" to abort: "
+	read yesno
+
+	if [ $yesno != y ] && [ $yesno = n ]
+	then
+		echo
+		echo -en "Aborting now "
+		sleep 1
+
+		exit
+	elif [ $yesno = y ]
+	then
+		echo
+		echo -e "Processing all subjects listed"
+
+		# Creating the file holding the output
+		# putting today's date into a variable
+		today_date=`date +"%Y%m%d"`
+
+		# Putting the contents of the variable "subjs_list" into another variable to have it output as a single line
+		subjs_list_FINAL=`echo ${subjs_list}`
+
+		# Checking what kind of output to be queried
+		if [ ${results_query} = output_fsl_anat ]
+		then
+			# Calling the function "results_query_fsl_anat"
+			results_query_fsl_anat
+
+		elif [ ${results_query} = output_sienax ]
+		then
+			# Calling the function "results_query_sienax"
+			results_query_sienax
+		fi
+	else
+		echo
+		echo -e "Please enter \"y\" or \"n\" "
+		sleep 2
+	fi
+done

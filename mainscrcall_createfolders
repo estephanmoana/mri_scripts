@@ -1,0 +1,394 @@
+#! /bin/bash
+# Submenu create folders script #
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to INPUT menu
+trap "echo -en '\n\nGoing back to the INPUT menu '; sleep 2; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+# emptvar="${SUBJS_FOLDERS_PATH}"
+# var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+# checkemptvar
+
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+
+function confirm_folder {
+# This will check if the full path for data storage directory is correct
+echo
+echo -e "Full path to store the data: ${FULLPATH}"
+
+# Loop for user's decision
+while [ 1 ]
+do
+	echo
+	echo -en "\tPlease confirm if this is the correct full path to store the data (y/n) "
+	read fullpath
+
+	case ${fullpath} in
+	Y | y)
+		break ;;
+	N | n)
+		echo
+		echo -e "Please correct the full path to store the data in the INPUT menu, by choosing option \"10\" in the INPUT menu\n"
+
+		echo -en "Going back to the INPUT menu "
+		sleep 3
+
+		exit ;;
+	*)
+		echo
+		echo -en "No valid option chosen "
+		sleep 2 ;;
+	esac
+done
+}
+
+function create_folder {
+# This will check if the content of the MEDIA variable is an existing directory
+if [ -d ${MEDIA} ]
+then
+	echo -en
+else
+	echo -e "The storage path where to save the data does not exist - please check"
+	echo -e "Back to INPUT menu "
+	sleep 3
+
+	exit
+fi
+
+# Checking if the folder in the EXPERIMENT variable is an existing directory
+if [ -d ${EXPERIMENT} ]
+then
+	echo
+	echo -e "*** WARNING *** There is already a folder named \"${EXPERIMENT}\" within this path: ${MEDIA}\n"
+
+	echo -e "You should check the entered name entered for the \"experiment\" before proceeding"
+	echo -en "Press any key to go back to the INPUT menu "
+	read anykey
+
+	exit
+fi
+
+# Asking to confirm the creation of folders
+echo
+echo -e "The following folder will be created within this directory: ${MEDIA}/${EXPERIMENT}: variables_text_files"
+# echo -e "subjs"
+
+echo -en "Do you want to proceed?(y/n) "
+read yesno
+
+if [ ${yesno} = y ]
+then
+	# Create data folder in the media chosen
+	echo
+	echo -e "Creating folders for data\n"
+
+	# Proceeding to create the below folder within the experiment folder
+	# First going to the /tmp folder - if there is any error in the script, this will prevent any damages to the filesystem
+	cd /tmp
+
+	cd ${MEDIA}
+	mkdir ${EXPERIMENT}
+	mkdir ${EXPERIMENT}/variables_text_files
+# 	mkdir ${EXPERIMENT}/subjs
+
+	cd /tmp
+
+elif [ ${yesno} = n ]
+then
+	echo
+	echo -e "No folders will be created"
+	echo -en "Going back to the PROCESSING menu "
+
+	sleep 3
+
+	exit
+else
+	echo
+	echo -e "No valid option choosen!"
+	echo -en " Going back to the INPUT menu "
+
+	sleep 3
+
+	exit
+fi
+}
+
+function create_folder_subjects {
+# Create folders for all subjects to be processed
+echo
+echo -e "Creating folders for each subject listed here:\n"
+
+# Showing all subjects listed in the "SUBJLIST" variable in a numbered list
+# Establishing tne initial subject numbering
+subjnumber=1
+
+for subj in ${SUBJLIST}
+do
+	subjnumber=`printf "%02d" ${subjnumber}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+	echo "${subjnumber}) ${subj}"
+
+	# Adding a unit to the numbering variable. 	# Note the use of "10#" - this is because numbers like 008 or 009 are interpreted as octal by bash during arithmetic operations. So by using "10#" you tell bash that these number are base 10. Maybe not needed here since only using a single trailing zero
+	subjnumber=$[ 10#$subjnumber + 1 ]
+done
+
+# Cleaning the contents of the variable below
+unset subjnumber
+
+# # Loop to create the folders dfor each subject
+# for SUBJ in ${SUBJLIST}
+# do
+# 	# Checks if folder for this subject was already created
+# 	chkexistfold=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ} 2> /dev/null`
+# 
+# 	if [ "${chkexistfold}" != "${SUBJ}" ]
+# 	then
+# 		# Create subject folder
+# 		mkdir ${SUBJS_FOLDERS_PATH}/${SUBJ}
+# 	else
+# 		echo
+# 		echo -e "\t*** Folder for ${SUBJ} was already created - please check ***"
+# 		echo -en "\tIf this subject was entered incorrectly, PLEASE CORRECT SUBJECTS INFO USING OPTION \"a2\" AT THE INPUT MENU "
+# 		sleep 3
+# 	fi
+# done
+
+# Loop to create the folders dfor each subject
+for SUBJ in ${SUBJLIST}
+do
+	# Checks if folder for this subject was already created
+	chkexistfold=`ls -d ${FULLPATH}/${SUBJ} 2> /dev/null`
+
+	if [ "${chkexistfold}" != "${SUBJ}" ]
+	then
+		# Create subject main folder
+		mkdir ${FULLPATH}/${SUBJ}
+		
+# 		# Create "derivatives" subfolder
+# 		mkdir ${FULLPATH}/${SUBJ}/derivatives
+	else
+		echo
+		echo -e "\t*** Folder for ${SUBJ} was already created - please check ***"
+		echo -en "\tIf this subject was entered incorrectly, PLEASE CORRECT SUBJECTS INFO USING OPTION \"a2\" AT THE INPUT MENU "
+		sleep 3
+	fi
+done
+
+# Giving feedback to the user
+echo -e "\n"
+echo -e "Created folders for all subjects"
+
+cd /tmp
+}
+
+function check_folder_created {
+# Testing if folders were created properly
+echo
+echo -e "Checking if the folder for \"experiment\" was created\n"
+
+cd ${MEDIA}
+
+foldercheck=${EXPERIMENT}
+# Calling the function "checkfoldexist" from mainscrcall_funclib
+checkfoldexist
+
+# cd /tmp
+# 
+# echo
+# echo -e "Checking if the folder named \"derivatives\" (for derivatives of raw data) was created\n"
+# 
+# cd ${MEDIA}
+# 
+# foldercheck=${EXPERIMENT}/derivatives
+# 
+# # Calling the function "checkfoldexist" from functionslibr_FSL
+# checkfoldexist
+
+cd /tmp
+
+echo
+echo -e "Checking if the folder for \"variables text files\" was created\n"
+
+cd ${MEDIA}
+
+foldercheck=${EXPERIMENT}/variables_text_files
+
+# Calling the function "checkfoldexist" from functionslibr_FSL
+checkfoldexist
+
+cd /tmp
+
+echo
+echo -en "\nPlease do final check if all folders were created in the opened file explorer "
+
+sleep 3
+
+# Checking the OS system to open the correct file explorer
+if [ "!${OS_USED}" = !Linux ]
+then
+	# For linux-based systems
+	nautilus ${FULLPATH} 2> /dev/null
+else
+	# For MacOSX systems
+	open ${FULLPATH} 2> /dev/null
+fi
+}
+
+function remove_folders {
+echo
+echo -e "Current full path for data storage:\n${FULLPATH}"
+
+echo
+echo -e "Contents of this directory:\n"
+
+ls ${FULLPATH}
+
+echo
+echo -en "\tConfirm if you wish to remove all the above folders (y/n) "
+read fullpath
+
+
+case ${fullpath} in
+Y | y)
+	cd /tmp
+
+	# Asking to the user if the folders created should be removed
+	echo -e "\n"
+	echo -e "*** WARNING *** Proceeding will delete all files inside this directory: ${MEDIA}/${EXPERIMENT}"
+	echo -e "You should check if these folders are empty before deleting them!\n"
+
+	echo -en "Do you REALLY want to proceed?(y/n) "
+	read yesno
+
+	if [ ${yesno} = y ]
+	then
+		echo -e "\n"
+		echo -en "Removing the folders "
+
+		cd ${MEDIA}
+
+		rm -rf ${EXPERIMENT}
+
+		cd /tmp
+
+		echo
+		echo -en "Removed all folders - going back to INPUT menu "
+
+		sleep 3
+
+		exit
+
+	elif [ ${yesno} = n ]
+	then
+		echo
+		echo -e "No folders will be removed"
+		echo -en "Going back to the INPUT menu "
+
+		sleep 3
+
+		exit
+	else
+		echo
+		echo -e "No valid option choosen!"
+		echo -en " Going back to the INPUT menu "
+
+		sleep 3
+
+		exit
+	fi ;;
+N | n)
+	echo
+	echo -e "No folders will be removed"
+	echo -en "Going back to the INPUT menu "
+
+	sleep 3
+
+	exit ;;
+*)
+	clear
+	echo -e "No valid option chosen\n"
+	;;
+esac
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+# Main menu for this script
+clear
+
+echo -e "\tWhat do you need to to do:\n"
+echo -e "\t1. Create folders for experiment and subjects (NEW STUDY)"
+echo -e "\t2. Create folders for subjects only (ONGOING STUDY: Experiment folder and subfolders already created)"
+echo -e "\t3. Remove previously created folders"
+echo -e "\t0. Go back to main menu\n"
+
+echo -en "\t\tEnter your option here and press enter: "
+read option_fold
+
+# Ask for user input to continue
+while [ 1 ]
+do
+  case ${option_fold} in
+    0)
+		echo
+		echo -en "Going back to the INPUT menu "
+		sleep 2
+
+		break ;;
+    1)
+		# Calling the functions to perform the selected actions
+		# This function checks if the full path for data storage is correct
+		confirm_folder
+
+		# This function will create all folders for the "experiment"
+		create_folder
+
+		# This function will create the subfolders for each subject
+		create_folder_subjects
+
+		# This function will allow the user to check all folders created
+		check_folder_created
+
+		break ;;
+    2)
+		# Calling the functions to perform the selected actions
+		# This function checks if the full path for data storage is correct
+		confirm_folder
+
+		# This function will create the subfolders for each subject
+		create_folder_subjects
+
+		break ;;
+	3)
+		# Calling the functions to perform the selected actions
+		# This function will remove all folders created, allowing the user to review them first
+		remove_folders
+
+		break ;;
+	*)
+		echo -e "No valid option chosen\n"
+		echo -e "Please re-enter an option"
+		sleep 2 ;;
+  esac
+done
+
+echo
+echo -en "\nTo continue to the INPUT menu, press any key "
+read -n1 continue

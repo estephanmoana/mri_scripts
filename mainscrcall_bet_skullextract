@@ -1,0 +1,595 @@
+#! /bin/bash
+
+# Use BET to strip skull from anatomical images #
+# Extracts skull from anatomical images by performing 2 bet commands using a fractional intensity threshold of 0.15 to allow a greater brain outline estimate so not to loose part of the cerebellum in the first pass and try to clean the optic nerve in the second pass
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function manual_automated_processing {
+# This functions allows the user to do processing of fieldmap files automated or manually
+while [ 1 ]
+do
+	echo
+	echo -e "Please choose if you want to do the ANATOMICAL files:"
+	echo -e "1. AUTOMATED (will use the ANATOMICAL contrast entered as a descriptor for file selection)"
+	echo -e "2. MANUALLY (you can choose each ANATOMICAL file for each subject)"
+
+	echo
+	echo -en "Please enter your option: "
+	read anatomical_processing_user
+
+	# Giving feedback to the user and allowing to confirm option
+	if [ -n "${anatomical_processing_user}" ] && [ ${anatomical_processing_user} = 1 ]
+	then
+		echo
+		echo -e "Using AUTOMATED processing"
+
+		# Assigning the variable signaling the processing mode chosen
+		anatomical_processing=AUTOMATED
+
+		echo -en "Press any key to continue "
+		read -n 1 anykey
+
+		break
+
+	elif [ -n "${anatomical_processing_user}" ] && [ ${anatomical_processing_user} = 2 ]
+	then
+		echo
+		echo -e "Using MANUAL processing"
+
+		# Assigning the variable signaling the processing mode chosen
+		anatomical_processing=MANUAL
+
+		echo -en "Press any key to continue "
+		read -n 1 anykey
+
+		break
+	else
+		echo
+		echo -en "Please choose one of the options above "
+
+		sleep 2
+	fi
+done
+}
+
+function choose_anatomical_output_bet_commands {
+# This function will do a 2-pass BET using a liberal -f threshold - this seems to provide a good non-brain tissue extraction most of the times for ANATOMICAL T1-WEIGHTED
+
+# Checking if processing is to be done AUTOMATED or MANUAL
+if [ ${anatomical_processing} = AUTOMATED ]
+then
+	# Listing the ANATOMICAL files into a variable (It is certain that the subject being processed has ANATOMICAL files with the contrast chosen - this was checked before calling this function. This command lists the files in a numerical list
+	anatfiles_to_use=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*${CONTRAST_PROCESS}*_stdMNI.nii.gz 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!'`
+
+	echo
+	echo -e "ANATOMICAL files to be processed:\n${anatfiles_to_use}"
+
+	echo -e "\n"
+	echo -en "Preparing ANATOMICAL image(s) for subject ### ${SUBJ} ### for processing "
+
+elif [ ${anatomical_processing} = MANUAL ]
+then
+	while [ 1 ]
+	do
+		# Listing the anatomical files to the user. This command lists the files in a numerical list
+		echo -e "\n"
+
+		ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*${CONTRAST_PROCESS}*_stdMNI.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!' | sed "=" | sed 'N; s/\n/) /'
+
+		echo
+		echo -en "Enter here the number for each anatomical file to be processed, separated by a space if more than one (to skip, press enter): "
+		read anat_file_list
+
+		if [ -n "${anat_file_list}" ] # Checking if this variable is non-zero in length
+		then
+			# Collecting the anatomical files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+			var1_available=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*_stdMNI.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+			var2_list="${anat_file_list}" # The numbers chosen by the user corresponding to the files to be used
+
+			# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+			numbered_list_display "${var1_available}" "${var2_list}"
+
+			# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+			anatfiles_to_use="${files_to_use}"
+
+			# Cleaning the contents of the variables below
+			unset files_to_use
+
+			echo
+			echo -e "You have selected the following files:\n"
+
+			# Presenting the selected anatomical files to the user
+			for item in ${anatfiles_to_use}
+			do
+				echo $item
+			done
+
+			echo
+			echo -en "Is this correct?(y/n) "
+			read yesno
+
+			if [ ${yesno} = y ]
+			then
+				echo -e "\n"
+				echo -en "Preparing anatomical image(s) for subject ### ${SUBJ} ### for processing "
+			else
+				echo
+				echo -en "Please corrected the files to be processed "
+
+				# Cleaning the contents for the variable below for correction
+				unset anatfiles_to_use
+
+				sleep 2
+			fi
+		else
+			# This parameter substitution will remove the skipped subject from the variable SUBJLIST
+			SUBJLIST=${SUBJLIST/$SUBJ/}
+
+			# Gathering the subjects that were skipped to a variable to later present it to the user
+			subj_not_processed="${SUBJ} ${subj_not_processed}"
+
+			echo
+			echo -en "Subject \"${SUBJ}\" have no anatomical image selected and will be skipped "
+			sleep 2
+
+			break
+		fi
+	done
+fi
+
+# Preparing the ANATOMICAL files to be processed by BET
+for anat_file_name in ${anatfiles_to_use}
+do
+	anat_file=`echo ${anat_file_name} | sed 's/.nii.gz//'`
+
+	####### Checking if will use a 2-STEP BET processing or use CUSTOM BET parameters as defined by the user ######
+	if [ -n "${BET_usage}" ] && [ ${BET_usage} = two_pass ] # BET commands for 2-STEP usage
+	then
+		# Collecting all BET commands into a single, semicolon separated line within a text file which will be used for processing using the function "parallel_processing_bash" in functionslibr_FSL
+		echo "bet ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${anat_file} ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}_${anat_file}_step1.nii.gz -f 0.15 -g 0; bet ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}_${anat_file}_step1.nii.gz ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${anat_file}_brain.nii.gz -f 0.15 -g 0; rm ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}*step1.nii.gz" >> ${temp_folder}/${ppss_command_file}
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: bet; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/LOGFILE_Non-brain-tissue-removal_bet_${anat_file}.txt
+
+		echo -e "Command BET to remove non-brain tissue for ANATOMICAL file" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/LOGFILE_Non-brain-tissue-removal_bet_${anat_file}.txt
+
+		echo -e "\nbet ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${anat_file} ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}_${anat_file}_step1.nii.gz -f 0.15 -g 0; bet ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}_${anat_file}_step1.nii.gz ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${anat_file}_brain.nii.gz -f 0.15 -g 0; rm ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}*step1.nii.gz" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/LOGFILE_Non-brain-tissue-removal_bet_${anat_file}.txt
+		#####################################
+
+	elif [ -n "${BET_usage}" ] && [ ${BET_usage} = custom ] # BET command for CUSTOM user-defined parameters
+	then
+		# BET command using custom parameters
+		echo "bet ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${anat_file} ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}_${anat_file}_brain.nii.gz `echo "${bet_parameters}" | sed 's/"//g'`" >> ${temp_folder}/${ppss_command_file}
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: bet; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/LOGFILE_Non-brain-tissue-removal_bet_${anat_file}.txt
+
+		echo -e "Command BET to remove non-brain tissue for anatomical file" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/LOGFILE_Non-brain-tissue-removal_bet_${anat_file}.txt
+
+		echo -e "\nbet ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${anat_file} ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}_${anat_file}_brain.nii.gz `echo "${bet_parameters}" | sed 's/"//g'`" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/LOGFILE_Non-brain-tissue-removal_bet_${anat_file}.txt
+		#####################################
+	fi
+done
+
+echo
+echo -en "Skull extraction set for subject ### ${SUBJ}### "
+
+sleep 1
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_skullextracion # Where the temporary files will be held
+ppss_command_file=subject_skull_extraction.txt # Basename for the temporary files
+
+struct_contrast_available="T1 T2 PD" # Contrasts for ANATOMICAL images available
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+
+# Clearing the terminal and going to the /tmp folder just in case of any error no mess is done in the filesystem
+clear
+
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed - this will be used both for emerald or local processing
+mkdir ${temp_folder} 2> /dev/null
+
+# Main menu logic
+# Giving information to the user on what this script will do
+echo
+echo -e "Non-brain tissue extraction is a step needed prior to different analysis in FSL"
+echo -e "Here, you can proceed to remove non-brain tissue from different images"
+echo -e "This script will extract the skull from the ANATOMICAL images selected for the subjects listed:\n"
+
+# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+# Establishing tne initial subject numbering
+subjnumber=1
+
+for subj in ${SUBJLIST}
+do
+	echo "${subjnumber}) ${subj}"
+
+	# adding a unit to the numbering variable
+	subjnumber=$[ $subjnumber + 1 ]
+done
+
+# Cleanig the contents of the numbering variable
+unset subjnumber
+
+# FUNCTION CALL: Calling function "anatomical_contrast" in "mainscrcall_funclib" to allow the user to choose the contrast in the anatomical images to be processed
+anatomical_contrast
+
+# Asking the user how BET processing should be done (pre-determined parameters or custom)
+while [ 1 ]
+do
+	echo
+	echo -e "Please choose from the list below the processing pipeline desired:"
+
+	echo
+	echo -e "\t1. Pre-determind BET parameters (optimized for Anatomical T1-weighted)"
+	echo -e "\t2. Custom thresholding in BET (\"-f\",\"-g\", \"-c\") (any image type)"
+
+	echo
+	echo -en "Your option: "
+	read option
+
+	case $option in
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "bet_skullextract:Remove non-brain tissues from anatomical image" FSL "(choose_anatomical_output_bet_commands) bet (used pre-determined parameters optimized for T1-weighted images)"
+
+		# This option will use a 2-pass BET using a liberal -f threshold - this seems to provide a good non-brain tissue extraction most of the times for ANATOMICAL T1-WEIGHTED
+		# Using the variable "BET_usage" to define the mode for BET
+		BET_usage=two_pass
+
+		# FUNCTION CALL: Calling function "manual_automated_processing" to allow the user to do processing of fieldmap files automated or manually
+		manual_automated_processing
+
+		for SUBJ in ${SUBJLIST}
+		do
+			echo -e "\n"
+
+			echo -e "#########################################################"
+			echo -e "ANATOMICAL file(s) processing for subject *** ${SUBJ} ***"
+			echo -e "#########################################################"
+
+			# Collecting the anatomical files list for the subject into a variable
+			anat_file_list_temp=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*${CONTRAST_PROCESS}*_stdMNI.nii.gz 2> /dev/null`
+
+			# Checking if the variable "anat_file_list_temp" is empty or not
+			if [ -n "$anat_file_list_temp" ]
+			then
+				# Calling the function "choose_anatomical_output_bet_commands" to save the subject's anatomical file(s) list into a text file and also ouputing the BET commands in a text file for processing using the function "parallel_processing_bash"
+				choose_anatomical_output_bet_commands
+			else
+				echo
+				echo -e "##### No anatomical files in MNI orientation were found for subject \"$SUBJ\" #####"
+				echo -e "This is/are the available NIFTI files, if present:"
+				echo -e "Path: ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat"
+				echo -e "NIFTI file(s):" `ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!' | sed 's/\n/ /'`
+
+				echo
+				echo -e "Skipping this subject for non-brain tissue removal "
+
+				echo
+				echo -en "Press any key to continue "
+				read -n1 anykey
+
+				# This parameter substitution will remove the skipped subject from the variable SUBJLIST
+				SUBJLIST=${SUBJLIST/$SUBJ/}
+
+				# Gathering the subjects that were skipped to a variable to later present it to the user
+				subj_not_processed="${subj_not_processed} ${SUBJ}"
+			fi
+		done
+
+		# Creating a "SUBJLIST" variable without spaces to check below
+		SUBJLIST_nospaces=`echo "${SUBJLIST}" | sed 's/ //g'`
+
+		# Checking if the variable "SUBJLIST" has content or is empty "in case no subject had an antomical in MNI orientation"
+		if [ X"${SUBJLIST_nospaces}" != X ] # This is a better way to test if the variable is empty, since if the variable has a space it is not considered empty by testing [ -n $variable ]. Copied this idea from the script "fsl_motion_outliers"
+		then
+			# Calling the function "parallel_processing_ppss" to extract non-brain tissues from ANATOMICAL images. Note the 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted here
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file} calling_script
+		else
+			echo -e "\n"
+			echo -e "*** There was no subject with anatomical files in MNI orientation ***"
+			echo -e "Please do the reorientation on the anatomical files for all subjects then proceed with skull extraction\n"
+
+			echo -en "Press any key to go to the PROCESSING menu "
+			read -n1 anykey
+
+			exit
+		fi
+
+		echo -e "\n"
+		echo -e "\tSkull extraction from anatomical images finished"
+		echo -e "\tPlease remember that you *** MUST *** check the output of BET to assess the accuracy of the skull extraction"
+
+		# Checking if any subject were skipped from processing
+		if [ -n "${subj_not_processed}" ] # If this variable is not empty, it will contain the subjects not processed
+		then
+			echo
+			echo -e "The following subjects were skipped from processing:\n"
+
+			for item in ${subj_not_processed}
+			do
+				echo ${item}
+			done
+
+		fi
+
+		# Giving the option to the user to look at the temporary files created before erasing them
+		cd /tmp
+
+		echo -e "\n"
+		echo -e "\tIf you want to look at the temporary files created in this folder: ${temp_folder}"
+		echo -e "\tAnd the log files for the PPSS command, please do so before continuing to the main menu\n"
+
+		echo -e "\tOtherwise, all log files will be erased as soon as you press any key to continue\n"
+
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		# Removing the temporary folder and its contents
+		rm -rf ${temp_folder} 2> /dev/null
+
+		# Removing all PPSS log files after user input
+		rm -r $PPSS_DIR/* 2> /dev/null
+
+		break ;;
+	2)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "bet_skullextract:Remove non-brain tissues from anatomical image" FSL "(choose_anatomical_output_bet_commands) bet (used user customized parameters)"
+
+		# This option will use a user defined BET parameters
+		# Using the variable "BET_usage" to define the mode for BET
+		BET_usage=custom
+
+		# FUNCTION CALL: Calling function "manual_automated_processing" to allow the user to do processing of fieldmap files automated or manually
+		manual_automated_processing
+
+ 		# Giving information to the user on what this script will do
+		while [ 1 ]
+		do
+			echo
+			echo -e "This routine will use BET parameters as defined by you below:\n"
+
+			echo -e "\t1. \"Parameter -f\": <f> fractional intensity threshold (0->1); default=0.5; smaller values give larger brain outline estimates"
+			echo -e "\t2. \"Parameter -g\": <g> vertical gradient in fractional intensity threshold (-1->1); default=0; positive values give larger brain"
+			echo -e "\t3. \"Parameter -c\": <x y z> centre-of-gravity (voxels not mm) of initial mesh surface."
+
+			echo
+			echo -en "Enter here the options you want to use, separated by a space (leave blank for bet defaults): "
+			read bet_options
+
+			# Loop to gather user's input on bet parameters
+			if [ -z "$bet_options" ]
+			then
+				echo
+				echo -en "*** No BET parameters entered - using default *** "
+
+				sleep 2
+				bet_defaults="yes"
+			else
+				for item in $bet_options
+				do
+					# This will check if the data from the user is valid before he is allowed to enter further input
+					# NEED TO CHECK IF THE USE OF ELIFS WORKS IN ALL SITUATIONS ######
+					if [ $item = 1 ]
+					then
+						echo
+						echo -en "Please enter the desired ** fractional intensity threshold ** (between 0 and 1): "
+						read fract_intens_thresh
+
+					elif [ $item = 2 ]
+					then
+						echo
+						echo -en "Please enter the desired ** vertical gradient ** in fractional intensity threshold (between -1 and 1): "
+						read vert_grad_thresh
+
+					elif [ $item = 3 ]
+					then
+						echo
+						echo -en "Please enter the desired ** coordinates for initial mesh surface ** (in voxels): "
+						read mesh_surface_coord
+
+					elif [ $item != 1 ] || [ $item != 2 ] || [ $item != 3 ]
+					then
+						echo
+						echo -en "You entered \"$item\", which is not a valid option! Please enter any number between 1-3 only "
+						sleep 3
+					fi
+				done
+			fi
+
+			echo -e "\n"
+			echo -e "These are the parameters entered for BET:"
+
+			# Checking which parameters were entered before displaying them
+			# Have to use separate if statements to check each variable for content
+			##### These statements will define the contents of the variable "bet_parameters", to be used later within the function "bet_custom_settings"
+			if [ -n "${fract_intens_thresh}" ]
+			then
+				echo
+				echo -e "-f  ${fract_intens_thresh}"
+				bet_parameters="-f ${fract_intens_thresh}"
+			fi
+
+			if [ -n "${vert_grad_thresh}" ]
+			then
+				echo
+				echo -e "-g  ${vert_grad_thresh}"
+				bet_parameters="${bet_parameters} \"-g ${vert_grad_thresh}\""
+			fi
+
+			if [ -n "${mesh_surface_coord}" ]
+			then
+				echo
+				echo -e "-c "${mesh_surface_coord}""
+				bet_parameters="${bet_parameters} \"-c ${mesh_surface_coord}\""
+			fi
+
+			if [ -n "${bet_defaults}" ] && [ ${bet_defaults} = yes ]
+			then
+				echo
+				echo -e "Using BET default parameters"
+				bet_parameters=""
+			fi
+
+			echo
+			echo -en "Are these correct?(y/n) "
+			read yesno
+
+			if [ $yesno = y ] || [ $yesno = Y ]
+			then
+				echo
+				echo -e "Proceeding to non-brain tissue removal"
+
+				break
+			else
+				echo
+				echo -en "Please correct the information entered "
+				sleep 3
+			fi
+		done
+
+		for SUBJ in ${SUBJLIST}
+		do
+			echo -e "\n"
+			echo -e "Choose from the list below which files are to be processed for subject \"${SUBJ}\"\n"
+
+			# Collecting the anatomical files list for the subject into a variable
+			anat_file_list_temp=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*_stdMNI.nii.gz | sed "s!${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/!!"`
+
+			# Checking if the variable "anat_file_list_temp" is empty or not
+			if [ -n "$anat_file_list_temp" ]
+			then
+				# Listing the anatomical files to the user
+				echo $anat_file_list_temp
+
+				# Calling the function "choose_anatomical_output_bet_commands" to save the subject's anatomical file(s) list into a text file and also ouputing the BET commands in a text file for processing using the function "parallel_processing_bash"
+				choose_anatomical_output_bet_commands
+			else
+				echo
+				echo -e "##### No anatomical files in MNI orientation were found for subject \"$SUBJ\" #####"
+				echo -e "This is/are the available NIFTI files, if present:"
+				echo -e "Path: ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat"
+				echo -e "NIFTI file(s):" `ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!' | sed 's/\n/ /'`
+
+				echo
+				echo -e "Skipping this subject for non-brain tissue removal "
+
+				echo
+				echo -en "Press any key to continue "
+				read -n1 anykey
+
+				# This parameter substitution will remove the skipped subject from the variable SUBJLIST
+				SUBJLIST=${SUBJLIST/$SUBJ/}
+
+				# Gathering the subjects that were skipped to a variable to later present it to the user
+				subj_not_processed="${SUBJ} ${subj_not_processed}"
+			fi
+		done
+
+		# Creating a "SUBJLIST" variable without spaces to check below
+		SUBJLIST_nospaces=`echo "${SUBJLIST}" | sed 's/ //g'`
+
+		# Checking if the variable "SUBJLIST" has content or is empty "in case no subject had an antomical in MNI orientation"
+		if [ X"${SUBJLIST_nospaces}" != X ] # This is a better way to test if the variable is empty, since if the variable has a space it is not considered empty by testing [ -n $variable ]. Copied this idea from the script "fsl_motion_outliers"
+		then
+			# Calling the function "parallel_processing_ppss" to extract non-brain tissues from ANATOMICAL images. Note the 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted here
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file} calling_script
+		else
+			echo -e "\n"
+			echo -e "*** There was no subject with anatomical files in MNI orientation ***"
+			echo -e "Please do the reorientation on the anatomical files for all subjects then proceed with skull extraction\n"
+
+			echo -en "Press any key to go to the PROCESSING menu "
+			read -n1 anykey
+
+			exit
+		fi
+
+		# Checking if any subject were skipped from processing
+		if [ -n "${subj_not_processed}" ] # If this variable is not empty, it will contain the subjects not processed
+		then
+			echo
+			echo -e "The following subjects were skipped from processing:\n"
+
+			for item in ${subj_not_processed}
+			do
+				echo ${item}
+			done
+
+		fi
+
+		echo -e "\n"
+		echo -e "\tSkull extraction from anatomical images finished"
+		echo -e "\tPlease remember that you MUST check the output of BET to assess the accuracy of the skull extraction\n"
+
+		# Giving the option to the user to look at the temporary files created before erasing them
+		cd /tmp
+
+		echo -e "\n"
+		echo -e "\tIf you want to look at the temporary files created in this folder: ${temp_folder}"
+		echo -e "\tPlease do so before continuing \n"
+
+		echo -e "\tOtherwise, all files will be erased as soon as you press any key to continue\n"
+
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		# Removing the temporary folder and its contents
+		rm -rf ${temp_folder} 2> /dev/null
+
+		# Removing all PPSS log files after user input
+		rm -r $PPSS_DIR/* 2> /dev/null
+
+		break ;;
+	*)
+		echo
+		echo -e "No valid option chosen - returning to previous menu "
+		sleep 3
+		clear ;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"

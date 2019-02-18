@@ -1,0 +1,138 @@
+#! /bin/bash
+
+# Script to change the "Design.fsf" cluster-based 2nd-level analysis to voxel-based
+function ppss_processing {
+# This will use the PPSS command, using all available processing cores and also hyper-threading if available
+
+# Entering the /tmp directory just in case any errors occur, it will not mess up the filesystem
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r /tmp/ppss_tempdir 2> /dev/null
+
+# Removing all PPSS log files that might be present
+rm -r $PPSS_DIR/job_log 2> /dev/null
+rm $PPSS_DIR/ppss-log*.txt 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir /tmp/ppss_tempdir 2> /dev/null
+
+# This creates an empty file
+touch /tmp/ppss_tempdir/subjects_voxel-based.txt
+
+# Checking if a full analysis file was created for the subject before calling FEAT
+for subject in ${subject_list}
+do
+	if [ -f ${feat_templates_folder}/${subject}_voxel.fsf ]
+	then
+		echo ${feat_templates_folder}/${subject}_voxel.fsf >> /tmp/ppss_tempdir/subjects_voxel-based.txt
+	else
+		echo
+		echo -e "\tSKIPPING SUBJECT \"${subject}\" AS NO "design.fsf" FILE EXISTS\n"
+		subj_not_processed="${subj_not_processed} ${subject} "
+	fi
+done
+
+# This will effectivelly run the PPSS command - note that $ITEM is used instead of $SUBJ, since this is how the PPSS command retrieves the items from the input text file
+ppss -f /tmp/ppss_tempdir/subjects_voxel-based.txt -c 'feat $ITEM'
+
+echo
+echo -e "\tIf you want to look at the log files for the PPSS command, please do so before continuing to the main menu\n"
+echo -e "\tOtherwise, all log files will be erased as soon as you press any key to continue\n"
+
+echo -e "\n"
+echo -e "\tVoxel-based 2nd level analysis processing for these subjects finished:\n${subject_list}"
+echo -e "\tIf any subjects were skipped from processing, they are listed here: \"${subj_not_processed}\"\n"
+cd /tmp
+
+echo -en "\nPress anykey to go back to the main menu "
+read -n1 continue
+
+# Removing the temporary folder and files created
+rm -r /tmp/ppss_tempdir
+
+# Removing all log files after user input
+rm -r $PPSS_DIR/job_log
+rm $PPSS_DIR/ppss-log*.txt
+rm $PPSS_DIR/ppss-array-pointer*
+}
+
+clear
+cd /tmp
+
+# echo
+# echo -en "Enter where the feat templates generated here will be saved (FULL PATH): "
+# read feat_templates_folder
+
+echo
+echo -en "Enter full path to the 2nd level analysis folder: "
+read folder_path
+
+echo
+echo -e "Listing the subjects' folder already present in the \"analysis/2ndlevel\" folder:"
+echo
+ls -d ${folder_path}/*.gfeat | sed "s!${folder_path}/!!"
+
+echo
+echo -en "Enter list of subjects \"gfeat\" folders from the above list (if you want ALL of them, just enter \"all\"): "
+read subject_list_chosen
+
+if [ $subject_list_chosen = all ]
+then
+	subject_list="`ls -d ${folder_path}/*.gfeat | sed "s!${folder_path}/!!"`"
+else
+	subject_list="$subject_list_chosen"
+fi
+
+# Assigning a variable for the new design files
+feat_templates_folder=/tmp/cluster_threshold_change_design_files
+
+echo
+echo -e "Please confirm the entered data\n"
+echo -e "Design templates will be saved in folder: ${feat_templates_folder}\n"
+echo -e "2nd level analysis folder: ${folder_path}\n"
+echo -e "Subjects list: ${subject_list}\n"
+
+echo
+echo -en "Is this correct?(y/n) "
+read yesno
+
+if [ ${yesno} = y ]
+then
+	echo
+	echo -e "Changing the design.fsf file to change the cluster based threshold\n"
+
+	mkdir ${feat_templates_folder} 2> /dev/null
+
+	for subject in ${subject_list}
+	do
+		cat ${folder_path}/${subject}/design.fsf | sed '/^set fmri(prob_thresh)/d' > ${feat_templates_folder}/${subject}_voxel_temp01.fsf
+		cat ${feat_templates_folder}/${subject}_voxel_temp01.fsf | sed '/^set fmri(z_thresh)/d' > ${feat_templates_folder}/${subject}_voxel.fsf
+		rm ${feat_templates_folder}/${subject}_voxel_temp01.fsf
+
+		subject_nogfeatadded=`echo ${subject} | sed 's/.gfeat//'`
+
+		echo >> ${feat_templates_folder}/${subject}_voxel.fsf
+
+		echo -e "#### LINES ADDED TO UPDATE THIS ANALYSIS TO VOXEL-BASED AND THE OUTPUT DIRECTORY\n" >> ${feat_templates_folder}/${subject}_voxel.fsf
+		echo "set fmri(prob_thresh) 0.001" >> ${feat_templates_folder}/${subject}_voxel.fsf
+		echo "set fmri(z_thresh) 3.09" >> ${feat_templates_folder}/${subject}_voxel.fsf
+	done
+
+	echo
+	echo -e "All subjects processed. Please check the new design.fsf files at: ${feat_templates_folder}\n"
+else
+	read -n1 -p "Press any key to go back to the PROCESSING MENU " anykey
+	exit
+fi
+
+echo -en "Do you want to go ahead with feat analysis with the newly created design.fsf files?(y/n) "
+read feat_analysis
+
+if [ ${feat_analysis} = y ]
+then
+	ppss_processing
+else
+	read -n1 -p "Press any key to go back to the PROCESSING MENU " anykey
+	exit
+fi

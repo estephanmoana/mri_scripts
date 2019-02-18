@@ -1,0 +1,1560 @@
+#! /bin/bash
+
+# Sourcing of functions library files #
+. functionslibr_FSL
+
+# This script will extract the Lesser Evil data from the raw data text files
+clear
+
+# Going to /tmp to prevent any damage to other files
+cd /tmp
+
+function LE_choice_calculations {
+# Removing any previously ran analysis by deleting the folder within /tmp
+rm -rf ${temp_folder} 2> /dev/null
+
+# Creating a folder within /tmp for holding temp files
+mkdir -p ${temp_folder}/ORIG
+
+# Copying the files for each subject in the raw data folder to the temp_folder within "/tmp"
+for item in `ls ${raw_data_path}/*.txt`
+do
+	cp $item ${temp_folder}/ORIG/
+done
+
+# First, extracting only the lines that are real trials into a new cleaned up file
+for item in `ls ${temp_folder}/ORIG/*.txt`
+do
+	# Creating a variable with the file name without the ".txt"
+	item_nameonly=`echo ${item} | sed 's!'${temp_folder}'/ORIG/!!' | sed 's/.txt//'`
+
+	# Changing the IFS variable value temporarily
+	# Changing the *** FIELD SEPARATOR *** from space to new line
+	# First saving the original IFS variable
+	OLD_IFS=$IFS
+
+	# Now changing FIELD SEPARATOR to new line
+	IFS=$'\n'
+
+	# Triaging the lines that contain "real" trials into a text file
+	for line in `cat $item`
+	do
+		# Collecting the content of the 2nd column ("real","training")
+		trial_type=`echo $line | awk -F: '{print $2}'`
+
+		# Testing if it is a "real" trial (instead of a "training" one)
+		if [ "$trial_type" = real ]
+		then
+			echo $line >> ${temp_folder}/${item_nameonly}_real-trials-only.txt
+		fi
+	done
+
+	# Changing the *** FIELD SEPARATOR *** back to the default
+	IFS=$OLD_IFS
+done
+
+# Second, extracting the information from the cleaned up file
+for subjs_file in `ls ${temp_folder}/*_real-trials-only.txt` # listing all files so each is processed individually
+do
+	# Getting the subject name into a variable
+	subj_nameonly=`echo ${subjs_file} | sed 's!'${temp_folder}/'!!' | sed 's/_real-trials-only.txt//' | awk -F_ '{print $1"_"$5}'`
+
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Processing file for subject \"${subj_nameonly}\" "
+
+	# Exporting the trial number and stimulus level to a text file with 2 columns (1=trial number for level, 2=mech value, 3=trial_reinf, 4=reinf_type, 5=reinf_intensity, 6=trial number total, 7=reversal # for level, 8=reversal mech value) for different data fields
+
+	for line in `cat ${subjs_file}`
+	do
+		# Getting the content of column #4 for each line to check if it contains a trial
+		trial_med_exists=`echo $line | awk -F: '{print $4}'`
+		trial_hi_exists=`echo $line | awk -F: '{print $5}'`
+
+		if [ "$trial_med_exists" != - ] # Checking if a trial is present for this line (value of variable is not "-")
+		then
+			# Since there is a trial in this line, output its selected content to a text file
+			echo $line | awk -F: '{print $4":"$10":"$7":"$15":"$16":"$3":"$17":"$19}' >> ${temp_folder}/${subj_nameonly}_trial-type_M-med.txt
+
+		elif [ "$trial_hi_exists" != - ] # Checking if a trial is present for this line (value of variable is not "-")
+		then
+			echo $line | awk -F: '{print $5":"$12":"$8":"$15":"$16":"$3":"$18":"$20}' >> ${temp_folder}/${subj_nameonly}_trial-type_M-hi.txt
+		fi
+	done
+
+	###### CALCULATIONS #####
+	###########################
+	# Calculating MEANS OVER ALL TRIALS
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# For TRIALS
+		# Calculating the MEAN for TRIALS mech values and storing it in a variable
+		mean_all_trials=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt`
+
+		# Calculating the MEDIAN for TRIALS mech values and storing it in a variable
+		# First, getting all mech values into a text file
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt > ${temp_folder}/${subj_nameonly}_median_calc_${file_type}.txt
+
+		# Second, calling the function "stat_median" in functionslibr_FSL to calculate the MEDIAN
+		median_all_trials=`stat_median ${temp_folder}/${subj_nameonly}_median_calc_${file_type}.txt`
+
+		# For REVERSALS
+		# Calculating the MEAN for REVERSAL mech values and storing it in a variable
+		mean_reversal_all_trials=`awk -F: '{if ($8 != "-") {total += $8; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt`
+
+		# Calculating the MEDIAN for REVERSAL mech values and storing it in a variable
+		# First, getting all reversal mech values into a text file. Notice the "sed" command to remove the dashes when there are no reversals.
+		awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_median_calc_reversal_${file_type}.txt
+
+		# Second, calling the function "stat_median" in functionslibr_FSL to calculate the MEDIAN
+		median_reversal_all_trials=`stat_median ${temp_folder}/${subj_nameonly}_median_calc_reversal_${file_type}.txt`
+
+
+		# Exporting the variable contents to a file specific to the file type. It initialized the file here.
+		# Data for TRIALS
+		echo "mean_all_trials:$mean_all_trials" > ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# Appending the median to the file
+		echo "median_all_trials:$median_all_trials" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# Data for REVERSALS
+		echo "mean_reversal_all_trials:$mean_reversal_all_trials" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# Appending the median to the file
+		echo "median_reversal_all_trials:$median_reversal_all_trials" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+	###########################
+
+	###########################
+	# Calculating MEANS OVER THIRDS OF TOTAL NUMBER OF TRIALS
+	# STEP 01 = getting the total number of trials
+	trials_total_number=`cat $subjs_file | awk -F: '{print $3}' | sort -nr | sed -n '1p'` # Taking the total number of trials from the main text file (cleaned)
+
+	# TRIALS and REVERSALS according to each subtype (M_med, M_hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# For TRIALS
+		# Getting the total number of TRIALS for the subtype being processed
+		trials_subtype_total_number=`cat ${item} | awk -F: '{print $1}' | sort -nr | sed -n '1p'`
+
+		# For REVERSALS
+		# Getting the total number of REVERSALS for the subtype being processed. Notice the "sed" command to remove the dashes when there are no reversals.
+		reversal_subtype_total_number=`cat ${item} | awk -F: '{print $7}' | sed 's/-//' | sort -nr | sed -n '1p'`
+
+		# Exporting the variable contents to a file specific to the file type
+		echo "trials_subtype_total_number:$trials_subtype_total_number" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "reversal_subtype_total_number:$reversal_subtype_total_number" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 02 = Determining if the number of trials is divsible by 3 to see how many trials there are in each third. If not divisible, need to test how many trials goes in the first third (2nd and 3rd thirds will always have the same number)
+
+	# STEP 2.1 = Getting the integer and decimals for the division by 3 into variables
+	# Trials according to each subtype (M_med, M_hi, reversal_med, reversal_hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_calculations-temp_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_calculations-temp_'!!' | sed 's/.txt//'`
+
+		# Getting the number of trials for the trial subtype being processed from the "calculations-temp" file
+		trials_subtype_total_number=`grep trials_subtype_total_number: ${item} | sed 's/'trials_subtype_total_number:'//'`
+
+		# Diving the number of trials by 3, and getting the integer and decimals into separate variables
+		raw_count_third_trials_subtype_integer=`echo "scale=2; $trials_subtype_total_number / 3" | bc | awk -F. {'print $1}'`
+		raw_count_third_trials_subtype_decimals=`echo "scale=2; $trials_subtype_total_number / 3" | bc | awk -F. {'print $2}'`
+
+		# Exporting the variable contents to a file specific to the file subtype. NOT REALLY NEEDED, ONLY FOR QUALITY ASSESSMENT.
+		echo "raw_count_third_trials_subtype_integer:$raw_count_third_trials_subtype_integer" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "raw_count_third_trials_subtype_decimals:$raw_count_third_trials_subtype_decimals" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# STEP 2.2 = Testing to see if the division had no remainder (decimals = 00), if the number divided by 3 was above (decimals = 33) or below (decimals = 66) a number divisble by 3
+		# Trials count by thirds for each trial subtype
+		# Getting the decimals value for each trial subtype
+
+		if [ $raw_count_third_trials_subtype_decimals = 00 ] # In this case, all thirds will have the same number of trials
+		then
+			# Putting the number of trials in each third into variables
+			count_1st_third_subtype=$raw_count_third_trials_subtype_integer
+			count_2nd_third_subtype=$raw_count_third_trials_subtype_integer
+			count_3rd_third_subtype=$raw_count_third_trials_subtype_integer
+
+			count_2nd_third_initial_subtype=$[ $count_1st_third_subtype + 1 ] # The initial trial number is one after the last of 1st third
+			count_2nd_third_last_subtype=$[ $count_1st_third_subtype + $count_2nd_third_subtype ] # the last trial number is the sum of the total trials in the 1st and 2nd thirds
+			count_3rd_third_initial_subtype=$[ ($count_1st_third_subtype + $count_2nd_third_subtype) + 1 ] # The initial trial number is the sum of the first 2 thirds plus one
+			# No need for end trial of last third, since it is the last trial of the sequence
+			count_last2thirds_subtype=$[ $count_2nd_third_subtype + $count_3rd_third_subtype ]
+
+		elif [ $raw_count_third_trials_subtype_decimals = 33 ] # In this case, the first third will have one unit more that the other 2 thirds. In other words, it will be integer part of the division + 1, while the other 2 thirds will be = integer
+		then
+			# Putting the number of trials in each third into variables
+			count_1st_third_subtype=$[ $raw_count_third_trials_subtype_integer + 1 ]
+			count_2nd_third_subtype=$raw_count_third_trials_subtype_integer
+			count_3rd_third_subtype=$raw_count_third_trials_subtype_integer
+
+			count_2nd_third_initial_subtype=$[ $count_1st_third_subtype + 1 ] # The initial trial number is one after the last of 1st third
+			count_2nd_third_last_subtype=$[ $count_1st_third_subtype + $count_2nd_third_subtype ] # the last trial number is the sum of the total trials in the 1st and 2nd thirds
+			count_3rd_third_initial_subtype=$[ ($count_1st_third_subtype + $count_2nd_third_subtype) + 1 ] # The initial trial number is the sum of the first 2 thirds plus one
+			# No need for end trial of last third, since it is the last trial of the sequence
+			count_last2thirds_subtype=$[ $count_2nd_third_subtype + $count_3rd_third_subtype ]
+
+		elif [ $raw_count_third_trials_subtype_decimals = 66 ] # In this case, the first third will have one unit less that the other 2 thirds. In other words, it will be = integer part of the division while the other 2 thirds will have - 1 each
+		then
+			# Putting the number of trials in each third into variables
+			count_1st_third_subtype=$[ $raw_count_third_trials_subtype_integer + 2 ]
+			count_2nd_third_subtype=$raw_count_third_trials_subtype_integer
+			count_3rd_third_subtype=$raw_count_third_trials_subtype_integer
+
+			count_2nd_third_initial_subtype=$[ $count_1st_third_subtype + 1 ] # The initial trial number is one after the last of 1st third
+			count_2nd_third_last_subtype=$[ $count_1st_third_subtype + $count_2nd_third_subtype ] # the last trial number is the sum of the total trials in the 1st and 2nd thirds
+			count_3rd_third_initial_subtype=$[ ($count_1st_third_subtype + $count_2nd_third_subtype) + 1 ] # The initial trial number is the sum of the first 2 thirds plus one
+			# No need for end trial of last third, since it is the last trial of the sequence
+			count_last2thirds_subtype=$[ $count_2nd_third_subtype + $count_3rd_third_subtype ]
+		fi
+
+		# Exporting the variables contents to a file specific to the file subtype
+		echo "count_1st_third_subtype:$count_1st_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_2nd_third_subtype:$count_2nd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_3rd_third_subtype:$count_3rd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "count_2nd_third_initial_subtype:$count_2nd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_2nd_third_last_subtype:$count_2nd_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_3rd_third_initial_subtype:$count_3rd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_last2thirds_subtype:$count_last2thirds_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 2.3 = Separating the output files into 1st, 2nd, 3rd third and last 2 thirds of trials
+	# Trials according to each subtype (M_med, M_hi, reversal_med, reversal_hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# Getting the necessary contents for processing below into variables from the "calculations-temp" file
+		for item2 in `ls ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt`
+		do
+			count_1st_third_subtype=`grep count_1st_third_subtype: ${item2} | sed 's/'count_1st_third_subtype:'//'`
+			count_2nd_third_initial_subtype=`grep count_2nd_third_initial_subtype: ${item2} | sed 's/'count_2nd_third_initial_subtype:'//'`
+			count_2nd_third_last_subtype=`grep count_2nd_third_last_subtype: ${item2} | sed 's/'count_2nd_third_last_subtype:'//'`
+			count_3rd_third_initial_subtype=`grep count_3rd_third_initial_subtype: ${item2} | sed 's/'count_3rd_third_initial_subtype:'//'`
+		done
+
+		for line in `cat $item`
+		do
+			line_count=`echo $line | awk -F: '{print $1}'` # Getting the trial number into a variable
+
+			if [ $line_count -le $count_1st_third_subtype ] # Checking if the trial number being processed is less or equal to the  total of trials in 1st third. If so, outputs this line into a text file for 1st third
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt
+
+			elif [ $line_count -ge $count_2nd_third_initial_subtype ] && [ $line_count -le $count_2nd_third_last_subtype ] # Checking if the trial number being processed is equal or greater than initial trial # and less or equal to the last trial # for the 2nd third. If so, outputs this line into a text file for 2nd third
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt
+
+			elif [ $line_count -ge $count_3rd_third_initial_subtype ] # Checking if the trial number being processed is equal or greater than the initial trial # for the 3rd third. If so, outputs this line into a text file for last 2 thirds
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt
+			fi
+
+			# This has to be separated because if nested with the above if and elif they will satisfy the conditions and nothing is left for this to test, since its testing condition overlaps with those for 2nd and 3rd thirds
+			if [ $line_count -gt $count_1st_third_subtype ] # Checking if the trial number being processed is more than the total of trials in 1st third. If so, outputs this line into a text file for last 2 thirds
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt
+			fi
+		done
+	done
+
+	# STEP 2.4 = Calculation of MEANS and MEDIANS OVER THIRDS
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# For TRIALS
+		# Calculating the MEANS for TRIALS in each third
+		mean_1st_third_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt`
+		mean_2nd_third_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt`
+		mean_3rd_third_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt`
+		mean_last2thirds_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt`
+
+		# Creating text files with only the mech levels for MEDIAN calculation of TRIALS
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_median_calc.txt
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_median_calc.txt
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_median_calc.txt
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt > ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_median_calc.txt
+
+		# Calling the function "stat_median" in functionslibr_FSL to calculate the MEDIAN of TRIALS
+		median_1st_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_median_calc.txt`
+		median_2nd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_median_calc.txt`
+		median_3rd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_median_calc.txt`
+		median_last2thirds_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_median_calc.txt`
+
+		# For REVERSALS
+		# Calculating the MEANS for REVERSALS in each third
+		# First, need to check if the REVERSALS values are empty or not, to avoid errors when calculating the mean and median. Note the "sed" command to remove dashes which represent abscence of reversals
+		values_1st_third_reversal=`awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | sed 's/-//'`
+		values_2nd_third_reversal=`awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | sed 's/-//'`
+		values_3rd_third_reversal=`awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | sed 's/-//'`
+		values_last2thirds_reversal=`awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | sed 's/-//'`
+
+		# Checking if the file is empty before calculating (or not) the MEAN and MEDIAN for REVERSALS to prevent errors
+		if [ -n "$values_1st_third_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_1st_third_trials_subtype=`awk -F: '{if ($8 != "-") {total += $8; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_reversal_median_calc.txt
+
+			median_reversal_1st_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_1st_third_trials_subtype=-
+			median_reversal_1st_third_trials_subtype=-
+		fi
+
+		if [ -n "$values_2nd_third_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_2nd_third_trials_subtype=`awk -F: '{if ($8 != "-") {total += $8; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_reversal_median_calc.txt
+
+			median_reversal_2nd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_2nd_third_trials_subtype=-
+			median_reversal_2nd_third_trials_subtype=-
+		fi
+
+		if [ -n "$values_3rd_third_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_3rd_third_trials_subtype=`awk -F: '{if ($8 != "-") {total += $8; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_reversal_median_calc.txt
+
+			median_reversal_3rd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_3rd_third_trials_subtype=-
+			median_reversal_3rd_third_trials_subtype=-
+		fi
+
+		if [ -n "$values_last2thirds_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_last2thirds_trials_subtype=`awk -F: '{if ($8 != "-") {total += $8; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $8}' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_reversal_median_calc.txt
+
+			median_reversal_last2thirds_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_last2thirds_trials_subtype=-
+			median_reversal_last2thirds_trials_subtype=-
+		fi
+
+		# Exporting the variables contents to a file specific to the file subtype
+		# For TRIALS MEAN
+		echo "mean_1st_third_trials_subtype:$mean_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_2nd_third_trials_subtype:$mean_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_3rd_third_trials_subtype:$mean_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_last2thirds_trials_subtype:$mean_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# MEDIAN
+		echo "median_1st_third_trials_subtype:$median_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_2nd_third_trials_subtype:$median_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_3rd_third_trials_subtype:$median_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_last2thirds_trials_subtype:$median_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# For REVERSALS MEAN
+		echo "mean_reversal_1st_third_trials_subtype:$mean_reversal_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_reversal_2nd_third_trials_subtype:$mean_reversal_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_reversal_3rd_third_trials_subtype:$mean_reversal_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_reversal_last2thirds_trials_subtype:$mean_reversal_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# MEDIAN
+		echo "median_reversal_1st_third_trials_subtype:$median_reversal_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_reversal_2nd_third_trials_subtype:$median_reversal_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_reversal_3rd_third_trials_subtype:$median_reversal_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_reversal_last2thirds_trials_subtype:$median_reversal_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 03 = Identifying how many REINFORCERS and REVERSALS occurred in each third
+	# Counting TOTAL number of REINFORCERS and REVERSALS for both levels of MECHANICAL
+	# Defining both levels into a variable
+	mech_level_list="M-med M-hi"
+
+	for file_type in $mech_level_list
+	do
+		# Counting TOTAL number of reinforcers
+		reinf_count_total_subtype=0
+		reversal_count_total_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt`
+		do
+			reinf=`echo $line | awk -F: '{print $3}'`
+			reversal=`echo $line | awk -F: '{print $7}'`
+
+			if [ $reinf != - ]
+			then
+				reinf_count_total_subtype=$[ $reinf_count_total_subtype + 1 ]
+			fi
+
+			if [ $reversal != - ]
+			then
+				reversal_count_total_subtype=$[ $reversal_count_total_subtype + 1 ]
+			fi
+		done
+
+		# Counting reinforcers for 1st THIRD
+		reinf_count_1st_third_subtype=0
+		reversal_count_1st_third_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt`
+		do
+			reinf=`echo $line | awk -F: '{print $3}'`
+			reversal=`echo $line | awk -F: '{print $7}'`
+
+			if [ $reinf != - ]
+			then
+				reinf_count_1st_third_subtype=$[ $reinf_count_1st_third_subtype + 1 ]
+			fi
+
+			if [ $reversal != - ]
+			then
+				reversal_count_1st_third_subtype=$[ $reversal_count_1st_third_subtype + 1 ]
+			fi
+		done
+
+		# Counting reinforcers for 2nd THIRD
+		reinf_count_2nd_third_subtype=0
+		reversal_count_2nd_third_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt`
+		do
+			reinf=`echo $line | awk -F: '{print $3}'`
+			reversal=`echo $line | awk -F: '{print $7}'`
+
+			if [ $reinf != - ]
+			then
+				reinf_count_2nd_third_subtype=$[ $reinf_count_2nd_third_subtype + 1 ]
+			fi
+
+			if [ $reversal != - ]
+			then
+				reversal_count_2nd_third_subtype=$[ $reversal_count_2nd_third_subtype + 1 ]
+			fi
+		done
+
+		# Counting reinforcers for 1st THIRD
+		reinf_count_3rd_third_subtype=0
+		reversal_count_3rd_third_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt`
+		do
+			reinf=`echo $line | awk -F: '{print $3}'`
+			reversal=`echo $line | awk -F: '{print $7}'`
+
+			if [ $reinf != - ]
+			then
+				reinf_count_3rd_third_subtype=$[ $reinf_count_3rd_third_subtype + 1 ]
+			fi
+
+			if [ $reversal != - ]
+			then
+				reversal_count_3rd_third_subtype=$[ $reversal_count_3rd_third_subtype + 1 ]
+			fi
+		done
+
+		# Counting reinforcers for LAST 2 THIRDS
+		reinf_count_last2thirds_subtype=0
+		reversal_count_last2thirds_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt`
+		do
+			reinf=`echo $line | awk -F: '{print $3}'`
+			reversal=`echo $line | awk -F: '{print $7}'`
+
+			if [ $reinf != - ]
+			then
+				reinf_count_last2thirds_subtype=$[ $reinf_count_last2thirds_subtype + 1 ]
+			fi
+
+			if [ $reversal != - ]
+			then
+				reversal_count_last2thirds_subtype=$[ $reversal_count_last2thirds_subtype + 1 ]
+			fi
+		done
+
+		# Exporting the variables contents to a file specific to the file subtype
+		# For REINFORCERS
+		echo "reinf_count_total_subtype:$reinf_count_total_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reinf_count_1st_third_subtype:$reinf_count_1st_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reinf_count_2nd_third_subtype:$reinf_count_2nd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reinf_count_3rd_third_subtype:$reinf_count_3rd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reinf_count_last2thirds_subtype:$reinf_count_last2thirds_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# For REVERSALS
+		echo "reversal_count_total_subtype:$reversal_count_total_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_1st_third_subtype:$reversal_count_1st_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_2nd_third_subtype:$reversal_count_2nd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_3rd_third_subtype:$reversal_count_3rd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_last2thirds_subtype:$reversal_count_last2thirds_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# STEP 3.1 = Identifying the value of the last REVERSAL
+		reversal_subtype_last=`cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | awk -F: '{print $7":"$8}' | sed 's/-//' | sort -nr | sed -n '1p' | awk -F: '{print $2}'`
+
+		# Exporting the variables contents to a file specific to the file subtype
+		echo "reversal_subtype_last:$reversal_subtype_last" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 04 = Identifying the trial number (for all trials) for beginning and end of each third and last 2 thirds
+	# Defining both levels into a variable
+	mech_level_list="M-med M-hi"
+
+	for file_type in $mech_level_list
+	do
+		trial_number_1st_third_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | awk -F: '{print $6}' | sort -n | sed -n '1p'`
+		trial_number_1st_third_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | awk -F: '{print $6}' | sort -nr | sed -n '1p'`
+
+		trial_number_2nd_third_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | awk -F: '{print $6}' | sort -n | sed -n '1p'`
+		trial_number_2nd_third_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | awk -F: '{print $6}' | sort -nr | sed -n '1p'`
+
+		trial_number_3rd_third_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | awk -F: '{print $6}' | sort -n | sed -n '1p'`
+		trial_number_3rd_third_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | awk -F: '{print $6}' | sort -nr | sed -n '1p'`
+
+		trial_number_last2thirds_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | awk -F: '{print $6}' | sort -n | sed -n '1p'`
+		trial_number_last2thirds_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | awk -F: '{print $6}' | sort -nr | sed -n '1p'`
+
+		# Exporting the variables contents to a file specific to the file subtype
+		echo "trial_number_1st_third_initial_subtype:$trial_number_1st_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_1st_third_last_subtype:$trial_number_1st_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "trial_number_2nd_third_initial_subtype:$trial_number_2nd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_2nd_third_last_subtype:$trial_number_2nd_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "trial_number_3rd_third_initial_subtype:$trial_number_3rd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_3rd_third_last_subtype:$trial_number_3rd_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "trial_number_last2thirds_initial_subtype:$trial_number_last2thirds_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_last2thirds_last_subtype:$trial_number_last2thirds_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+	###########################
+
+	###########################
+	# Extracting the processed data into variables
+	# Loop to go through each calculation file (for M-med, M-hi, reversal-med, reversal-hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_calculations-temp_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_calculations-temp_'!!' | sed 's/.txt//'`
+
+		# Getting the total number of all trials, regardless of mechanical level. This was calculated in STEP 01
+		trials_bothlevels_total_number=${trials_total_number}
+
+		# Checking the file being processed so the variables are named accordingly
+		if [ $file_type = M-med ]
+		then
+			# MEAN and MEDIAN extraction
+			# For TRIALS
+			mean_all_trials_M_med=`grep '^mean_all_trials:' $item  | sed 's/mean_all_trials://'`
+			median_all_trials_M_med=`grep '^median_all_trials:' $item  | sed 's/median_all_trials://'`
+
+			mean_1st_third_trials_M_med=`grep '^mean_1st_third_trials_subtype:' $item | sed 's/mean_1st_third_trials_subtype://'`
+			mean_2nd_third_trials_M_med=`grep '^mean_2nd_third_trials_subtype:' $item | sed 's/mean_2nd_third_trials_subtype://'`
+			mean_3rd_third_trials_M_med=`grep '^mean_3rd_third_trials_subtype:' $item | sed 's/mean_3rd_third_trials_subtype://'`
+			mean_last2thirds_trials_M_med=`grep '^mean_last2thirds_trials_subtype:' $item | sed 's/mean_last2thirds_trials_subtype://'`
+
+			median_1st_third_trials_M_med=`grep '^median_1st_third_trials_subtype:' $item | sed 's/median_1st_third_trials_subtype://'`
+			median_2nd_third_trials_M_med=`grep '^median_2nd_third_trials_subtype:' $item | sed 's/median_2nd_third_trials_subtype://'`
+			median_3rd_third_trials_M_med=`grep '^median_3rd_third_trials_subtype:' $item | sed 's/median_3rd_third_trials_subtype://'`
+			median_last2thirds_trials_M_med=`grep '^median_last2thirds_trials_subtype:' $item | sed 's/median_last2thirds_trials_subtype://'`
+
+			# For REVERSALS
+			mean_all_trials_reversal_M_med=`grep '^mean_reversal_all_trials:' $item  | sed 's/mean_reversal_all_trials://'`
+			median_all_trials_reversal_M_med=`grep '^median_reversal_all_trials:' $item  | sed 's/median_reversal_all_trials://'`
+
+			mean_reversal_1st_third_trials_M_med=`grep '^mean_reversal_1st_third_trials_subtype:' $item | sed 's/mean_reversal_1st_third_trials_subtype://'`
+			mean_reversal_2nd_third_trials_M_med=`grep '^mean_reversal_2nd_third_trials_subtype:' $item | sed 's/mean_reversal_2nd_third_trials_subtype://'`
+			mean_reversal_3rd_third_trials_M_med=`grep '^mean_reversal_3rd_third_trials_subtype:' $item | sed 's/mean_reversal_3rd_third_trials_subtype://'`
+			mean_reversal_last2thirds_trials_M_med=`grep '^mean_reversal_last2thirds_trials_subtype:' $item | sed 's/mean_reversal_last2thirds_trials_subtype://'`
+
+			median_reversal_1st_third_trials_M_med=`grep '^median_reversal_1st_third_trials_subtype:' $item | sed 's/median_reversal_1st_third_trials_subtype://'`
+			median_reversal_2nd_third_trials_M_med=`grep '^median_reversal_2nd_third_trials_subtype:' $item | sed 's/median_reversal_2nd_third_trials_subtype://'`
+			median_reversal_3rd_third_trials_M_med=`grep '^median_reversal_3rd_third_trials_subtype:' $item | sed 's/median_reversal_3rd_third_trials_subtype://'`
+			median_reversal_last2thirds_trials_M_med=`grep '^median_reversal_last2thirds_trials_subtype:' $item | sed 's/median_reversal_last2thirds_trials_subtype://'`
+
+			# REINFORCERS data extraction
+			reinf_count_total_M_med=`grep '^reinf_count_total_subtype:' $item | sed 's/reinf_count_total_subtype://'`
+
+			reinf_count_1st_third_M_med=`grep '^reinf_count_1st_third_subtype:' $item | sed 's/reinf_count_1st_third_subtype://'`
+			reinf_count_2nd_third_M_med=`grep '^reinf_count_2nd_third_subtype:' $item | sed 's/reinf_count_2nd_third_subtype://'`
+			reinf_count_3rd_third_M_med=`grep '^reinf_count_3rd_third_subtype:' $item | sed 's/reinf_count_3rd_third_subtype://'`
+			reinf_count_last2thirds_M_med=`grep '^reinf_count_last2thirds_subtype:' $item | sed 's/reinf_count_last2thirds_subtype://'`
+
+			# REVERSALS data extraction
+			reversal_count_total_M_med=`grep '^reversal_count_total_subtype:' $item | sed 's/reversal_count_total_subtype://'`
+
+			reversal_count_1st_third_M_med=`grep '^reversal_count_1st_third_subtype:' $item | sed 's/reversal_count_1st_third_subtype://'`
+			reversal_count_2nd_third_M_med=`grep '^reversal_count_2nd_third_subtype:' $item | sed 's/reversal_count_2nd_third_subtype://'`
+			reversal_count_3rd_third_M_med=`grep '^reversal_count_3rd_third_subtype:' $item | sed 's/reversal_count_3rd_third_subtype://'`
+			reversal_count_last2thirds_M_med=`grep '^reversal_count_last2thirds_subtype:' $item | sed 's/reversal_count_last2thirds_subtype://'`
+
+			reversal_M_med_last=`grep '^reversal_subtype_last:' $item | sed 's/reversal_subtype_last://'`
+
+			# QUALITATIVE data extraction
+			# Trials total number
+			trials_total_number_M_med=`grep '^trials_subtype_total_number:' $item  | sed 's/trials_subtype_total_number://'`
+
+			# REVERSALS total number
+			reversals_M_med_total_number=`grep '^reversal_subtype_total_number:' $item  | sed 's/reversal_subtype_total_number://'`
+
+			count_1st_third_M_med=`grep '^count_1st_third_subtype:' $item | sed 's/count_1st_third_subtype://'`
+			count_2nd_third_M_med=`grep '^count_2nd_third_subtype:' $item | sed 's/count_2nd_third_subtype://'`
+			count_3rd_third_M_med=`grep '^count_3rd_third_subtype:' $item | sed 's/count_3rd_third_subtype://'`
+
+			trial_number_M_med_1st_third_initial=`grep '^trial_number_1st_third_initial_subtype:' $item | sed 's/trial_number_1st_third_initial_subtype://'`
+			trial_number_M_med_1st_third_last=`grep '^trial_number_1st_third_last_subtype:' $item | sed 's/trial_number_1st_third_last_subtype://'`
+
+			trial_number_M_med_2nd_third_initial=`grep '^trial_number_2nd_third_initial_subtype:' $item | sed 's/trial_number_2nd_third_initial_subtype://'`
+			trial_number_M_med_2nd_third_last=`grep '^trial_number_2nd_third_last_subtype:' $item | sed 's/trial_number_2nd_third_last_subtype://'`
+
+			trial_number_M_med_3rd_third_initial=`grep '^trial_number_3rd_third_initial_subtype:' $item | sed 's/trial_number_3rd_third_initial_subtype://'`
+			trial_number_M_med_3rd_third_last=`grep '^trial_number_3rd_third_last_subtype:' $item | sed 's/trial_number_3rd_third_last_subtype://'`
+
+			trial_number_M_med_last2thirds_initial=`grep '^trial_number_last2thirds_initial_subtype:' $item | sed 's/trial_number_last2thirds_initial_subtype://'`
+			trial_number_M_med_last2thirds_last=`grep '^trial_number_last2thirds_last_subtype:' $item | sed 's/trial_number_last2thirds_last_subtype://'`
+
+		elif [ $file_type = M-hi ]
+		then
+			# MEAN and MEDIAN extraction
+			# For TRIALS
+			mean_all_trials_M_hi=`grep '^mean_all_trials:' $item  | sed 's/mean_all_trials://'`
+			median_all_trials_M_hi=`grep '^median_all_trials:' $item  | sed 's/median_all_trials://'`
+
+			mean_1st_third_trials_M_hi=`grep '^mean_1st_third_trials_subtype:' $item | sed 's/mean_1st_third_trials_subtype://'`
+			mean_2nd_third_trials_M_hi=`grep '^mean_2nd_third_trials_subtype:' $item | sed 's/mean_2nd_third_trials_subtype://'`
+			mean_3rd_third_trials_M_hi=`grep '^mean_3rd_third_trials_subtype:' $item | sed 's/mean_3rd_third_trials_subtype://'`
+			mean_last2thirds_trials_M_hi=`grep '^mean_last2thirds_trials_subtype:' $item | sed 's/mean_last2thirds_trials_subtype://'`
+
+			median_1st_third_trials_M_hi=`grep '^median_1st_third_trials_subtype:' $item | sed 's/median_1st_third_trials_subtype://'`
+			median_2nd_third_trials_M_hi=`grep '^median_2nd_third_trials_subtype:' $item | sed 's/median_2nd_third_trials_subtype://'`
+			median_3rd_third_trials_M_hi=`grep '^median_3rd_third_trials_subtype:' $item | sed 's/median_3rd_third_trials_subtype://'`
+			median_last2thirds_trials_M_hi=`grep '^median_last2thirds_trials_subtype:' $item | sed 's/median_last2thirds_trials_subtype://'`
+
+			# For REVERSALS
+			mean_all_trials_reversal_M_hi=`grep '^mean_reversal_all_trials:' $item  | sed 's/mean_reversal_all_trials://'`
+			median_all_trials_reversal_M_hi=`grep '^median_reversal_all_trials:' $item  | sed 's/median_reversal_all_trials://'`
+
+			mean_reversal_1st_third_trials_M_hi=`grep '^mean_reversal_1st_third_trials_subtype:' $item | sed 's/mean_reversal_1st_third_trials_subtype://'`
+			mean_reversal_2nd_third_trials_M_hi=`grep '^mean_reversal_2nd_third_trials_subtype:' $item | sed 's/mean_reversal_2nd_third_trials_subtype://'`
+			mean_reversal_3rd_third_trials_M_hi=`grep '^mean_reversal_3rd_third_trials_subtype:' $item | sed 's/mean_reversal_3rd_third_trials_subtype://'`
+			mean_reversal_last2thirds_trials_M_hi=`grep '^mean_reversal_last2thirds_trials_subtype:' $item | sed 's/mean_reversal_last2thirds_trials_subtype://'`
+
+			median_reversal_1st_third_trials_M_hi=`grep '^median_reversal_1st_third_trials_subtype:' $item | sed 's/median_reversal_1st_third_trials_subtype://'`
+			median_reversal_2nd_third_trials_M_hi=`grep '^median_reversal_2nd_third_trials_subtype:' $item | sed 's/median_reversal_2nd_third_trials_subtype://'`
+			median_reversal_3rd_third_trials_M_hi=`grep '^median_reversal_3rd_third_trials_subtype:' $item | sed 's/median_reversal_3rd_third_trials_subtype://'`
+			median_reversal_last2thirds_trials_M_hi=`grep '^median_reversal_last2thirds_trials_subtype:' $item | sed 's/median_reversal_last2thirds_trials_subtype://'`
+
+			# REINFORCERS data extraction
+			reinf_count_total_M_hi=`grep '^reinf_count_total_subtype:' $item | sed 's/reinf_count_total_subtype://'`
+
+			reinf_count_1st_third_M_hi=`grep '^reinf_count_1st_third_subtype:' $item | sed 's/reinf_count_1st_third_subtype://'`
+			reinf_count_2nd_third_M_hi=`grep '^reinf_count_2nd_third_subtype:' $item | sed 's/reinf_count_2nd_third_subtype://'`
+			reinf_count_3rd_third_M_hi=`grep '^reinf_count_3rd_third_subtype:' $item | sed 's/reinf_count_3rd_third_subtype://'`
+			reinf_count_last2thirds_M_hi=`grep '^reinf_count_last2thirds_subtype:' $item | sed 's/reinf_count_last2thirds_subtype://'`
+
+			# REVERSALS data extraction
+			reversal_count_total_M_hi=`grep '^reversal_count_total_subtype:' $item | sed 's/reversal_count_total_subtype://'`
+
+			reversal_count_1st_third_M_hi=`grep '^reversal_count_1st_third_subtype:' $item | sed 's/reversal_count_1st_third_subtype://'`
+			reversal_count_2nd_third_M_hi=`grep '^reversal_count_2nd_third_subtype:' $item | sed 's/reversal_count_2nd_third_subtype://'`
+			reversal_count_3rd_third_M_hi=`grep '^reversal_count_3rd_third_subtype:' $item | sed 's/reversal_count_3rd_third_subtype://'`
+			reversal_count_last2thirds_M_hi=`grep '^reversal_count_last2thirds_subtype:' $item | sed 's/reversal_count_last2thirds_subtype://'`
+
+			reversal_M_hi_last=`grep '^reversal_subtype_last:' $item | sed 's/reversal_subtype_last://'`
+
+			# QUALITATIVE data extraction
+			# Trials total number
+			trials_total_number_M_hi=`grep '^trials_subtype_total_number:' $item  | sed 's/trials_subtype_total_number://'`
+
+			# REVERSALS total number
+			reversals_M_hi_total_number=`grep '^reversal_subtype_total_number:' $item  | sed 's/reversal_subtype_total_number://'`
+
+			count_1st_third_M_hi=`grep '^count_1st_third_subtype:' $item | sed 's/count_1st_third_subtype://'`
+			count_2nd_third_M_hi=`grep '^count_2nd_third_subtype:' $item | sed 's/count_2nd_third_subtype://'`
+			count_3rd_third_M_hi=`grep '^count_3rd_third_subtype:' $item | sed 's/count_3rd_third_subtype://'`
+
+			trial_number_M_hi_1st_third_initial=`grep '^trial_number_1st_third_initial_subtype:' $item | sed 's/trial_number_1st_third_initial_subtype://'`
+			trial_number_M_hi_1st_third_last=`grep '^trial_number_1st_third_last_subtype:' $item | sed 's/trial_number_1st_third_last_subtype://'`
+
+			trial_number_M_hi_2nd_third_initial=`grep '^trial_number_2nd_third_initial_subtype:' $item | sed 's/trial_number_2nd_third_initial_subtype://'`
+			trial_number_M_hi_2nd_third_last=`grep '^trial_number_2nd_third_last_subtype:' $item | sed 's/trial_number_2nd_third_last_subtype://'`
+
+			trial_number_M_hi_3rd_third_initial=`grep '^trial_number_3rd_third_initial_subtype:' $item | sed 's/trial_number_3rd_third_initial_subtype://'`
+			trial_number_M_hi_3rd_third_last=`grep '^trial_number_3rd_third_last_subtype:' $item | sed 's/trial_number_3rd_third_last_subtype://'`
+
+			trial_number_M_hi_last2thirds_initial=`grep '^trial_number_last2thirds_initial_subtype:' $item | sed 's/trial_number_last2thirds_initial_subtype://'`
+			trial_number_M_hi_last2thirds_last=`grep '^trial_number_last2thirds_last_subtype:' $item | sed 's/trial_number_last2thirds_last_subtype://'`
+		fi
+	done
+
+
+	# Outputing the results into a temporary file for the subject being processed
+	echo -e "${subj_nameonly}:${mean_all_trials_M_med}:${median_all_trials_M_med}:${mean_1st_third_trials_M_med}:${mean_2nd_third_trials_M_med}:${mean_3rd_third_trials_M_med}:${mean_last2thirds_trials_M_med}:${median_1st_third_trials_M_med}:${median_2nd_third_trials_M_med}:${median_3rd_third_trials_M_med}:${median_last2thirds_trials_M_med}:${reinf_count_total_M_med}:${reinf_count_1st_third_M_med}:${reinf_count_2nd_third_M_med}:${reinf_count_3rd_third_M_med}:${reinf_count_last2thirds_M_med}:${mean_all_trials_reversal_M_med}:${median_all_trials_reversal_M_med}:${mean_reversal_1st_third_trials_M_med}:${mean_reversal_2nd_third_trials_M_med}:${mean_reversal_3rd_third_trials_M_med}:${mean_reversal_last2thirds_trials_M_med}:${median_reversal_1st_third_trials_M_med}:${median_reversal_2nd_third_trials_M_med}:${median_reversal_3rd_third_trials_M_med}:${median_reversal_last2thirds_trials_M_med}:${reversal_M_med_last}:${mean_all_trials_M_hi}:${median_all_trials_M_hi}:${mean_1st_third_trials_M_hi}:${mean_2nd_third_trials_M_hi}:${mean_3rd_third_trials_M_hi}:${mean_last2thirds_trials_M_hi}:${median_1st_third_trials_M_hi}:${median_2nd_third_trials_M_hi}:${median_3rd_third_trials_M_hi}:${median_last2thirds_trials_M_hi}:${reinf_count_total_M_hi}:${reinf_count_1st_third_M_hi}:${reinf_count_2nd_third_M_hi}:${reinf_count_3rd_third_M_hi}:${reinf_count_last2thirds_M_hi}:${mean_all_trials_reversal_M_hi}:${median_all_trials_reversal_M_hi}:${mean_reversal_1st_third_trials_M_hi}:${mean_reversal_2nd_third_trials_M_hi}:${mean_reversal_3rd_third_trials_M_hi}:${mean_reversal_last2thirds_trials_M_hi}:${median_reversal_1st_third_trials_M_hi}:${median_reversal_2nd_third_trials_M_hi}:${median_reversal_3rd_third_trials_M_hi}:${median_reversal_last2thirds_trials_M_hi}:${reversal_M_hi_last}:QUALITATIVE:${trials_bothlevels_total_number}:${trials_total_number_M_med}:${count_1st_third_M_med}:${count_2nd_third_M_med}:${count_3rd_third_M_med}:${trials_total_number_M_hi}:${count_1st_third_M_hi}:${count_2nd_third_M_hi}:${count_3rd_third_M_hi}:${reversals_M_med_total_number}:${reversals_M_hi_total_number}:${trial_number_M_med_1st_third_initial}:${trial_number_M_med_1st_third_last}:${trial_number_M_med_2nd_third_initial}:${trial_number_M_med_2nd_third_last}:${trial_number_M_med_3rd_third_initial}:${trial_number_M_med_3rd_third_last}:${trial_number_M_med_last2thirds_initial}:${trial_number_M_med_last2thirds_last}:${trial_number_M_hi_1st_third_initial}:${trial_number_M_hi_1st_third_last}:${trial_number_M_hi_2nd_third_initial}:${trial_number_M_hi_2nd_third_last}:${trial_number_M_hi_3rd_third_initial}:${trial_number_M_hi_3rd_third_last}:${trial_number_M_hi_last2thirds_initial}:${trial_number_M_hi_last2thirds_last}:" > ${temp_folder}/${subj_nameonly}_${LE_paradigm}_calculations_TEMP.txt
+
+	# Giving feedback to the user
+	echo
+	echo -e "Finished processing this subject"
+done
+
+# Adding headers to the FINAL OUTPUT FILE. Total of 81 fields
+echo -e "SubjID:Mean_M_med_all_trials:Median_M_med_all_trials:Mean_M_med_1st_third:Mean_M_med_2nd_third:Mean_M_med_3rd_third:Mean_M_med_last2thirds:Median_M_med_1st_third:Median_M_med_2nd_third:Median_M_med_3rd_third:Median_M_med_last2thirds:Reinf_M_med_all_trials:Reinf_M_med_1st_third_trials:Reinf_M_med_2nd_third_trials:Reinf_M_med_3rd_third_trials:Reinf_M_med_last2thirds:Mean_reversal_M_med_all_trials:Median_reversal_M_med_all_trials:Mean_reversal_M_med_1st_third:Mean_reversal_M_med_2nd_third:Mean_reversal_M_med_3rd_third:Mean_reversal_M_med_last2thirds:Median_reversal_M_med_1st_third:Median_reversal_M_med_2nd_third:Median_reversal_M_med_3rd_third:Median_reversal_M_med_last2thirds:Last_reversal_M_med:Mean_M_hi_all_trials:Median_M_hi_all_trials:Mean_M_hi_1st_third:Mean_M_hi_2nd_third:Mean_M_hi_3rd_third:Mean_M_hi_last2thirds:Median_M_hi_1st_third:Median_M_hi_2nd_third:Median_M_hi_3rd_third:Median_M_hi_last2thirds:Reinf_M_hi_all_trials:Reinf_M_hi_1st_third_trials:Reinf_M_hi_2nd_third_trials:Reinf_M_hi_3rd_third_trials:Reinf_M_hi_last2thirds:Mean_reversal_M_hi_all_trials:Median_reversal_M_hi_all_trials:Mean_reversal_M_hi_1st_third:Mean_reversal_M_hi_2nd_third:Mean_reversal_M_hi_3rd_third:Mean_reversal_M_hi_last2thirds:Median_reversal_M_hi_1st_third:Median_reversal_M_hi_2nd_third:Median_reversal_M_hi_3rd_third:Median_reversal_M_hi_last2thirds:Last_reversal_M_hi:QUALITATIVE:Trials_total_number_all-levels:Trials_total_number_M_med:Trials_M_med_1st_third:Trials_M_med_2nd_third:Trials_M_med_3rd_third:Trials_total_number_M_hi:Trials_M_hi_1st_third:Trials_M_hi_2nd_third:Trials_M_hi_3rd_third:Reversals_M_med_total_number:Reversals_M_hi_total_number:Trial_total_number_M_med_1st_third_initial:Trial_total_number_M_med_1st_third_last:Trial_total_number_M_med_2nd_third_initial:Trial_total_number_M_med_2nd_third_last:Trial_total_number_M_med_3rd_third_initial:Trial_total_number_M_med_3rd_third_last:Trial_total_number_M_med_last2thirds_initial:Trial_total_number_M_med_last2thirds_last:Trial_total_number_M_hi_1st_third_initial:Trial_total_number_M_hi_1st_third_last:Trial_total_number_M_hi_2nd_third_initial:Trial_total_number_M_hi_2nd_third_last:Trial_total_number_M_hi_3rd_third_initial:Trial_total_number_M_hi_3rd_third_last:Trial_total_number_M_hi_last2thirds_initial:Trial_total_number_M_hi_last2thirds_last:" > $output_path/${LE_paradigm}_all-subjs_calculations.txt
+
+# Looping through all subjects calculations files
+for item in `ls ${temp_folder}/*_${LE_paradigm}_calculations_TEMP.txt`
+do
+	cat $item >> $output_path/${LE_paradigm}_all-subjs_calculations.txt
+done
+}
+
+function LE_escape_calculations {
+# Removing any previously ran analysis by deleting the folder within /tmp
+rm -rf ${temp_folder} 2> /dev/null
+
+# Creating a folder within /tmp for holding temp files
+mkdir -p ${temp_folder}/ORIG
+
+# Copying the files for each subject in the raw data folder to the temp_folder within "/tmp"
+for item in `ls ${raw_data_path}/*.txt`
+do
+	cp $item ${temp_folder}/ORIG/
+done
+
+# First, extracting only the lines that are real trials into a new cleaned up file
+for item in `ls ${temp_folder}/ORIG/*.txt`
+do
+	# Creating a variable with the file name without the ".txt"
+	item_nameonly=`echo ${item} | sed 's!'${temp_folder}'/ORIG/!!' | sed 's/.txt//'`
+
+	# Changing the IFS variable value temporarily
+	# Changing the *** FIELD SEPARATOR *** from space to new line
+	# First saving the original IFS variable
+	OLD_IFS=$IFS
+
+	# Now changing FIELD SEPARATOR to new line
+	IFS=$'\n'
+
+	# Removing the first line (headers) of the original file and exporting it to a text file
+	cat $item | sed '1d' >> ${temp_folder}/${item_nameonly}_real-trials-only.txt
+
+	# Changing the *** FIELD SEPARATOR *** back to the default
+	IFS=$OLD_IFS
+done
+
+# Second, extracting the information from the cleaned up file
+# for subjs_file in `ls ${temp_folder}/*_real-trials-only.txt` # listing all files so each is processed individually
+for subjs_file in `ls ${temp_folder}/*_real-trials-only.txt` # listing all files so each is processed individually
+do
+	# Getting the subject name into a variable
+	subj_nameonly=`echo ${subjs_file} | sed 's!'${temp_folder}/'!!' | sed 's/_real-trials-only.txt//' | awk -F_ '{print $1"_"$5}'`
+
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Processing file for subject \"${subj_nameonly}\" "
+
+	# Exporting the trial number and stimulus level to a text file with 2 columns (1=trial number for level, 2=mech value, 3=trial number total, 4=reversal # for level, 5=reversal mech value, 6=Subj_delay) for different data fields
+	for line in `cat ${subjs_file}`
+	do
+		# Getting the content of column #4 for each line to check if it contains a trial
+		trial_med_exists=`echo $line | awk -F: '{print $3}'`
+		trial_hi_exists=`echo $line | awk -F: '{print $4}'`
+
+		if [ "$trial_med_exists" != - ] # Checking if a trial is present for this line (value of variable is not "-")
+		then
+			# Since there is a trial in this line, output its selected content to a text file
+			echo $line | awk -F: '{print $3":"$6":"$2":"$11":"$13":"$15}' >> ${temp_folder}/${subj_nameonly}_trial-type_M-med.txt
+
+		elif [ "$trial_hi_exists" != - ] # Checking if a trial is present for this line (value of variable is not "-")
+		then
+			echo $line | awk -F: '{print $4":"$8":"$2":"$12":"$14":"$15}' >> ${temp_folder}/${subj_nameonly}_trial-type_M-hi.txt
+		fi
+	done
+
+	###### CALCULATIONS #####
+	###########################
+	# Calculating MEANS OVER ALL TRIALS
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# For TRIALS
+		# Calculating the MEAN for TRIALS mech values and storing it in a variable
+		mean_all_trials=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt`
+
+		# Calculating the MEDIAN for TRIALS mech values and storing it in a variable
+		# First, getting all mech values into a text file
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt > ${temp_folder}/${subj_nameonly}_median_calc_${file_type}.txt
+
+		# Second, calling the function "stat_median" in functionslibr_FSL to calculate the MEDIAN
+		median_all_trials=`stat_median ${temp_folder}/${subj_nameonly}_median_calc_${file_type}.txt`
+
+		# For REVERSALS
+		# Calculating the MEAN for REVERSAL mech values and storing it in a variable
+		mean_reversal_all_trials=`awk -F: '{if ($5 != "-") {total += $5; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt`
+
+		# Calculating the MEDIAN for REVERSAL mech values and storing it in a variable
+		# First, getting all reversal mech values into a text file. Notice the "sed" command to remove the dashes when there are no reversals.
+		awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_median_calc_reversal_${file_type}.txt
+
+		# Second, calling the function "stat_median" in functionslibr_FSL to calculate the MEDIAN
+		median_reversal_all_trials=`stat_median ${temp_folder}/${subj_nameonly}_median_calc_reversal_${file_type}.txt`
+
+		# Exporting the variable contents to a file specific to the file type. It initialized the file here.
+		# Data for TRIALS
+		echo "mean_all_trials:$mean_all_trials" > ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# Appending the median to the file
+		echo "median_all_trials:$median_all_trials" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# Data for REVERSALS
+		echo "mean_reversal_all_trials:$mean_reversal_all_trials" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# Appending the median to the file
+		echo "median_reversal_all_trials:$median_reversal_all_trials" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+	###########################
+
+	###########################
+	# Calculating MEANS OVER THIRDS OF TOTAL NUMBER OF TRIALS
+	# STEP 01 = getting the total number of trials. Trial # stored in column 2.
+	trials_total_number=`cat $subjs_file | awk -F: '{print $2}' | sort -nr | sed -n '1p'` # Taking the total number of trials from the main text file (cleaned)
+
+	# TRIALS and REVERSALS according to each subtype (M_med, M_hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# For TRIALS
+		# Getting the total number of TRIALS for the subtype being processed
+		trials_subtype_total_number=`cat ${item} | awk -F: '{print $1}' | sort -nr | sed -n '1p'`
+
+		# For REVERSALS
+		# Getting the total number of REVERSALS for the subtype being processed. Notice the "sed" command to remove the dashes when there are no reversals.
+		reversal_subtype_total_number=`cat ${item} | awk -F: '{print $4}' | sed 's/-//' | sort -nr | sed -n '1p'`
+
+		# Exporting the variable contents to a file specific to the file type
+		echo "trials_subtype_total_number:$trials_subtype_total_number" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "reversal_subtype_total_number:$reversal_subtype_total_number" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 02 = Determining if the number of trials is divsible by 3 to see how many trials there are in each third. If not divisible, need to test how many trials goes in the first third (2nd and 3rd thirds will always have the same number)
+
+	# STEP 2.1 = Getting the integer and decimals for the division by 3 into variables
+	# Trials according to each subtype (M_med, M_hi, reversal_med, reversal_hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_calculations-temp_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_calculations-temp_'!!' | sed 's/.txt//'`
+
+		# Getting the number of trials for the trial subtype being processed from the "calculations-temp" file
+		trials_subtype_total_number=`grep trials_subtype_total_number: ${item} | sed 's/'trials_subtype_total_number:'//'`
+
+		# Diving the number of trials by 3, and getting the integer and decimals into separate variables
+		raw_count_third_trials_subtype_integer=`echo "scale=2; $trials_subtype_total_number / 3" | bc | awk -F. {'print $1}'`
+		raw_count_third_trials_subtype_decimals=`echo "scale=2; $trials_subtype_total_number / 3" | bc | awk -F. {'print $2}'`
+
+		# Exporting the variable contents to a file specific to the file subtype. NOT REALLY NEEDED, ONLY FOR QUALITY ASSESSMENT.
+		echo "raw_count_third_trials_subtype_integer:$raw_count_third_trials_subtype_integer" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "raw_count_third_trials_subtype_decimals:$raw_count_third_trials_subtype_decimals" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# STEP 2.2 = Testing to see if the division had no remainder (decimals = 00), if the number divided by 3 was above (decimals = 33) or below (decimals = 66) a number divisble by 3
+		# Trials count by thirds for each trial subtype
+		# Getting the decimals value for each trial subtype
+
+		if [ $raw_count_third_trials_subtype_decimals = 00 ] # In this case, all thirds will have the same number of trials
+		then
+			# Putting the number of trials in each third into variables
+			count_1st_third_subtype=$raw_count_third_trials_subtype_integer
+			count_2nd_third_subtype=$raw_count_third_trials_subtype_integer
+			count_3rd_third_subtype=$raw_count_third_trials_subtype_integer
+
+			count_2nd_third_initial_subtype=$[ $count_1st_third_subtype + 1 ] # The initial trial number is one after the last of 1st third
+			count_2nd_third_last_subtype=$[ $count_1st_third_subtype + $count_2nd_third_subtype ] # the last trial number is the sum of the total trials in the 1st and 2nd thirds
+			count_3rd_third_initial_subtype=$[ ($count_1st_third_subtype + $count_2nd_third_subtype) + 1 ] # The initial trial number is the sum of the first 2 thirds plus one
+			# No need for end trial of last third, since it is the last trial of the sequence
+			count_last2thirds_subtype=$[ $count_2nd_third_subtype + $count_3rd_third_subtype ]
+
+		elif [ $raw_count_third_trials_subtype_decimals = 33 ] # In this case, the first third will have one unit more that the other 2 thirds. In other words, it will be integer part of the division + 1, while the other 2 thirds will be = integer
+		then
+			# Putting the number of trials in each third into variables
+			count_1st_third_subtype=$[ $raw_count_third_trials_subtype_integer + 1 ]
+			count_2nd_third_subtype=$raw_count_third_trials_subtype_integer
+			count_3rd_third_subtype=$raw_count_third_trials_subtype_integer
+
+			count_2nd_third_initial_subtype=$[ $count_1st_third_subtype + 1 ] # The initial trial number is one after the last of 1st third
+			count_2nd_third_last_subtype=$[ $count_1st_third_subtype + $count_2nd_third_subtype ] # the last trial number is the sum of the total trials in the 1st and 2nd thirds
+			count_3rd_third_initial_subtype=$[ ($count_1st_third_subtype + $count_2nd_third_subtype) + 1 ] # The initial trial number is the sum of the first 2 thirds plus one
+			# No need for end trial of last third, since it is the last trial of the sequence
+			count_last2thirds_subtype=$[ $count_2nd_third_subtype + $count_3rd_third_subtype ]
+
+		elif [ $raw_count_third_trials_subtype_decimals = 66 ] # In this case, the first third will have one unit less that the other 2 thirds. In other words, it will be = integer part of the division while the other 2 thirds will have - 1 each
+		then
+			# Putting the number of trials in each third into variables
+			count_1st_third_subtype=$[ $raw_count_third_trials_subtype_integer + 2 ]
+			count_2nd_third_subtype=$raw_count_third_trials_subtype_integer
+			count_3rd_third_subtype=$raw_count_third_trials_subtype_integer
+
+			count_2nd_third_initial_subtype=$[ $count_1st_third_subtype + 1 ] # The initial trial number is one after the last of 1st third
+			count_2nd_third_last_subtype=$[ $count_1st_third_subtype + $count_2nd_third_subtype ] # the last trial number is the sum of the total trials in the 1st and 2nd thirds
+			count_3rd_third_initial_subtype=$[ ($count_1st_third_subtype + $count_2nd_third_subtype) + 1 ] # The initial trial number is the sum of the first 2 thirds plus one
+			# No need for end trial of last third, since it is the last trial of the sequence
+			count_last2thirds_subtype=$[ $count_2nd_third_subtype + $count_3rd_third_subtype ]
+		fi
+
+		# Exporting the variables contents to a file specific to the file subtype
+		echo "count_1st_third_subtype:$count_1st_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_2nd_third_subtype:$count_2nd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_3rd_third_subtype:$count_3rd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "count_2nd_third_initial_subtype:$count_2nd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_2nd_third_last_subtype:$count_2nd_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_3rd_third_initial_subtype:$count_3rd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "count_last2thirds_subtype:$count_last2thirds_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 2.3 = Separating the output files into 1st, 2nd, 3rd third and last 2 thirds of trials
+	# Trials according to each subtype (M_med, M_hi, reversal_med, reversal_hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# Getting the necessary contents for processing below into variables from the "calculations-temp" file
+		for item2 in `ls ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt`
+		do
+			count_1st_third_subtype=`grep count_1st_third_subtype: ${item2} | sed 's/'count_1st_third_subtype:'//'`
+			count_2nd_third_initial_subtype=`grep count_2nd_third_initial_subtype: ${item2} | sed 's/'count_2nd_third_initial_subtype:'//'`
+			count_2nd_third_last_subtype=`grep count_2nd_third_last_subtype: ${item2} | sed 's/'count_2nd_third_last_subtype:'//'`
+			count_3rd_third_initial_subtype=`grep count_3rd_third_initial_subtype: ${item2} | sed 's/'count_3rd_third_initial_subtype:'//'`
+		done
+
+		for line in `cat $item`
+		do
+			line_count=`echo $line | awk -F: '{print $1}'` # Getting the trial number into a variable
+
+			if [ $line_count -le $count_1st_third_subtype ] # Checking if the trial number being processed is less or equal to the  total of trials in 1st third. If so, outputs this line into a text file for 1st third
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt
+
+			elif [ $line_count -ge $count_2nd_third_initial_subtype ] && [ $line_count -le $count_2nd_third_last_subtype ] # Checking if the trial number being processed is equal or greater than initial trial # and less or equal to the last trial # for the 2nd third. If so, outputs this line into a text file for 2nd third
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt
+
+			elif [ $line_count -ge $count_3rd_third_initial_subtype ] # Checking if the trial number being processed is equal or greater than the initial trial # for the 3rd third. If so, outputs this line into a text file for last 2 thirds
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt
+			fi
+
+			# This has to be separated because if nested with the above if and elif they will satisfy the conditions and nothing is left for this to test, since its testing condition overlaps with those for 2nd and 3rd thirds
+			if [ $line_count -gt $count_1st_third_subtype ] # Checking if the trial number being processed is more than the total of trials in 1st third. If so, outputs this line into a text file for last 2 thirds
+			then
+				echo $line >> ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt
+			fi
+		done
+	done
+
+	# STEP 2.4 = Calculation of MEANS and MEDIANS OVER THIRDS
+	for item in `ls ${temp_folder}/${subj_nameonly}_trial-type_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_trial-type_'!!' | sed 's/.txt//'`
+
+		# For TRIALS
+		# Calculating the MEANS for TRIALS in each third
+		mean_1st_third_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt`
+		mean_2nd_third_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt`
+		mean_3rd_third_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt`
+		mean_last2thirds_trials_subtype=`awk -F: '{ total += $2; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt`
+
+		# Creating text files with only the mech levels for MEDIAN calculation of TRIALS
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_median_calc.txt
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_median_calc.txt
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_median_calc.txt
+		awk -F: '{print $2}' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt > ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_median_calc.txt
+
+		# Calling the function "stat_median" in functionslibr_FSL to calculate the MEDIAN of TRIALS
+		median_1st_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_median_calc.txt`
+		median_2nd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_median_calc.txt`
+		median_3rd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_median_calc.txt`
+		median_last2thirds_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_median_calc.txt`
+
+		# For REVERSALS
+		# Calculating the MEANS for REVERSALS in each third
+		# First, need to check if the REVERSALS values are empty or not, to avoid errors when calculating the mean and median. Note the "sed" command to remove dashes which represent abscence of reversals
+		values_1st_third_reversal=`awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | sed 's/-//'`
+		values_2nd_third_reversal=`awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | sed 's/-//'`
+		values_3rd_third_reversal=`awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | sed 's/-//'`
+		values_last2thirds_reversal=`awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | sed 's/-//'`
+
+		# Checking if the file is empty before calculating (or not) the MEAN and MEDIAN for REVERSALS to prevent errors
+		if [ -n "$values_1st_third_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_1st_third_trials_subtype=`awk -F: '{if ($5 != "-") {total += $5; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_reversal_median_calc.txt
+
+			median_reversal_1st_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_1st_third_trials_subtype=-
+			median_reversal_1st_third_trials_subtype=-
+		fi
+
+		if [ -n "$values_2nd_third_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_2nd_third_trials_subtype=`awk -F: '{if ($5 != "-") {total += $5; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_reversal_median_calc.txt
+
+			median_reversal_2nd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_2nd_third_trials_subtype=-
+			median_reversal_2nd_third_trials_subtype=-
+		fi
+
+		if [ -n "$values_3rd_third_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_3rd_third_trials_subtype=`awk -F: '{if ($5 != "-") {total += $5; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_reversal_median_calc.txt
+
+			median_reversal_3rd_third_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_3rd_third_trials_subtype=-
+			median_reversal_3rd_third_trials_subtype=-
+		fi
+
+		if [ -n "$values_last2thirds_reversal" ] # If this is true, then the variable is not empty
+		then
+			# MEAN
+			mean_reversal_last2thirds_trials_subtype=`awk -F: '{if ($5 != "-") {total += $5; count++} } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt` # Note the "if" statement within awk to negate fields with the dash
+
+			# MEDIAN
+			awk -F: '{print $5}' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | sed 's/-//' > ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_reversal_median_calc.txt
+
+			median_reversal_last2thirds_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_reversal_median_calc.txt`
+		else
+			# In this case, the variable and thus the source file is empty
+			mean_reversal_last2thirds_trials_subtype=-
+			median_reversal_last2thirds_trials_subtype=-
+		fi
+
+		# Exporting the variables contents to a file specific to the file subtype
+		# For TRIALS MEAN
+		echo "mean_1st_third_trials_subtype:$mean_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_2nd_third_trials_subtype:$mean_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_3rd_third_trials_subtype:$mean_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_last2thirds_trials_subtype:$mean_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# MEDIAN
+		echo "median_1st_third_trials_subtype:$median_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_2nd_third_trials_subtype:$median_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_3rd_third_trials_subtype:$median_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_last2thirds_trials_subtype:$median_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# For REVERSALS MEAN
+		echo "mean_reversal_1st_third_trials_subtype:$mean_reversal_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_reversal_2nd_third_trials_subtype:$mean_reversal_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_reversal_3rd_third_trials_subtype:$mean_reversal_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "mean_reversal_last2thirds_trials_subtype:$mean_reversal_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# MEDIAN
+		echo "median_reversal_1st_third_trials_subtype:$median_reversal_1st_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_reversal_2nd_third_trials_subtype:$median_reversal_2nd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_reversal_3rd_third_trials_subtype:$median_reversal_3rd_third_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "median_reversal_last2thirds_trials_subtype:$median_reversal_last2thirds_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 03 = Identifying how many REVERSALS occurred in each third
+	# Counting TOTAL number of REVERSALS for both levels of MECHANICAL
+	# Defining both levels into a variable
+	mech_level_list="M-med M-hi"
+
+	for file_type in $mech_level_list
+	do
+		# Counting TOTAL number of REVERSALS
+		reversal_count_total_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt`
+		do
+			reversal=`echo $line | awk -F: '{print $4}'`
+
+			if [ $reversal != - ]
+			then
+				reversal_count_total_subtype=$[ $reversal_count_total_subtype + 1 ]
+			fi
+		done
+
+		# Counting REVERSALS for 1st THIRD
+		reversal_count_1st_third_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt`
+		do
+			reversal=`echo $line | awk -F: '{print $4}'`
+
+			if [ $reversal != - ]
+			then
+				reversal_count_1st_third_subtype=$[ $reversal_count_1st_third_subtype + 1 ]
+			fi
+		done
+
+		# Counting REVERSALS for 2nd THIRD
+		reversal_count_2nd_third_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt`
+		do
+			reversal=`echo $line | awk -F: '{print $4}'`
+
+			if [ $reversal != - ]
+			then
+				reversal_count_2nd_third_subtype=$[ $reversal_count_2nd_third_subtype + 1 ]
+			fi
+		done
+
+		# Counting REVERSALS for 1st THIRD
+		reversal_count_3rd_third_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt`
+		do
+			reversal=`echo $line | awk -F: '{print $4}'`
+
+			if [ $reversal != - ]
+			then
+				reversal_count_3rd_third_subtype=$[ $reversal_count_3rd_third_subtype + 1 ]
+			fi
+		done
+
+		# Counting REVERSALS for LAST 2 THIRDS
+		reversal_count_last2thirds_subtype=0
+
+		for line in `cat ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt`
+		do
+			reversal=`echo $line | awk -F: '{print $4}'`
+
+			if [ $reversal != - ]
+			then
+				reversal_count_last2thirds_subtype=$[ $reversal_count_last2thirds_subtype + 1 ]
+			fi
+		done
+
+		# Exporting the variables contents to a file specific to the file subtype for REVERSALS
+		echo "reversal_count_total_subtype:$reversal_count_total_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_1st_third_subtype:$reversal_count_1st_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_2nd_third_subtype:$reversal_count_2nd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_3rd_third_subtype:$reversal_count_3rd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "reversal_count_last2thirds_subtype:$reversal_count_last2thirds_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# STEP 3.1 = Identifying the value of the last REVERSAL. Note that the first "awk" command outputs the reversal # and reversal mech value in order to sort the last reversal, then the second "awk" outputs only the reversal mech value.
+		reversal_subtype_last=`cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | awk -F: '{print $4":"$5}' | sed 's/-//' | sort -nr | sed -n '1p' | awk -F: '{print $2}'`
+
+		# Exporting the variables contents to a file specific to the file subtype
+		echo "reversal_subtype_last:$reversal_subtype_last" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 04 = Identifying the trial number (for all trials) for beginning and end of each third and last 2 thirds
+	# Defining both levels into a variable
+	mech_level_list="M-med M-hi"
+
+	for file_type in $mech_level_list
+	do
+		trial_number_1st_third_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | awk -F: '{print $3}' | sort -n | sed -n '1p'`
+		trial_number_1st_third_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt | awk -F: '{print $3}' | sort -nr | sed -n '1p'`
+
+		trial_number_2nd_third_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | awk -F: '{print $3}' | sort -n | sed -n '1p'`
+		trial_number_2nd_third_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt | awk -F: '{print $3}' | sort -nr | sed -n '1p'`
+
+		trial_number_3rd_third_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | awk -F: '{print $3}' | sort -n | sed -n '1p'`
+		trial_number_3rd_third_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt | awk -F: '{print $3}' | sort -nr | sed -n '1p'`
+
+		trial_number_last2thirds_initial_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | awk -F: '{print $3}' | sort -n | sed -n '1p'`
+		trial_number_last2thirds_last_subtype=`cat ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt | awk -F: '{print $3}' | sort -nr | sed -n '1p'`
+
+		# Exporting the variables contents to a file specific to the file subtype
+		echo "trial_number_1st_third_initial_subtype:$trial_number_1st_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_1st_third_last_subtype:$trial_number_1st_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "trial_number_2nd_third_initial_subtype:$trial_number_2nd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_2nd_third_last_subtype:$trial_number_2nd_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "trial_number_3rd_third_initial_subtype:$trial_number_3rd_third_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_3rd_third_last_subtype:$trial_number_3rd_third_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "trial_number_last2thirds_initial_subtype:$trial_number_last2thirds_initial_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "trial_number_last2thirds_last_subtype:$trial_number_last2thirds_last_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	# STEP 05 = Calculating the DELAY for response
+	# Defining both levels into a variable
+	mech_level_list="M-med M-hi"
+
+	for file_type in $mech_level_list
+	do
+		# MEANS
+		# For all trials
+		delay_response_mean_all_trials_subtype=`awk -F: '{ total += $6; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt`
+
+		# 1st third
+		delay_response_mean_1st_third_subtype=`awk -F: '{ total += $6; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt`
+
+		# 2nd third
+		delay_response_mean_2nd_third_subtype=`awk -F: '{ total += $6; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt`
+
+		# 3rd third
+		delay_response_mean_3rd_third_subtype=`awk -F: '{ total += $6; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt`
+
+		# Last 2 thirds
+		delay_response_mean_last2thirds_subtype=`awk -F: '{ total += $6; count++ } END { print total/count }' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt`
+
+		# MEDIANS
+		# Creating text files with only the mech levels for MEDIAN calculation of TRIALS
+		awk -F: '{print $6}' ${temp_folder}/${subj_nameonly}_trial-type_${file_type}.txt > ${temp_folder}/${subj_nameonly}_${file_type}_all_trials_delay_median_calc.txt
+
+		awk -F: '{print $6}' ${temp_folder}/${subj_nameonly}_${file_type}_1st_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_delay_median_calc.txt
+		awk -F: '{print $6}' ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_delay_median_calc.txt
+		awk -F: '{print $6}' ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third.txt > ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_delay_median_calc.txt
+		awk -F: '{print $6}' ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds.txt > ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_delay_median_calc.txt
+
+		# Calling the function "stat_median" in functionslibr_FSL to calculate the MEDIAN of TRIALS
+		delay_response_median_all_trials_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_all_trials_delay_median_calc.txt`
+
+		delay_response_median_1st_third_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_1st_third_delay_median_calc.txt`
+		delay_response_median_2nd_third_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_2nd_third_delay_median_calc.txt`
+		delay_response_median_3rd_third_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_3rd_third_delay_median_calc.txt`
+		delay_response_median_last2thirds_subtype=`stat_median ${temp_folder}/${subj_nameonly}_${file_type}_last2thirds_delay_median_calc.txt`
+
+		# Exporting the variables contents to a file specific to the file subtype
+		# MEANS
+		echo "delay_response_mean_all_trials_subtype:$delay_response_mean_all_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "delay_response_mean_1st_third_subtype:$delay_response_mean_1st_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "delay_response_mean_2nd_third_subtype:$delay_response_mean_2nd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "delay_response_mean_3rd_third_subtype:$delay_response_mean_3rd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "delay_response_mean_last2thirds_subtype:$delay_response_mean_last2thirds_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		# MEDIANS
+		echo "delay_response_median_all_trials_subtype:$delay_response_median_all_trials_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+
+		echo "delay_response_median_1st_third_subtype:$delay_response_median_1st_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "delay_response_median_2nd_third_subtype:$delay_response_median_2nd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "delay_response_median_3rd_third_subtype:$delay_response_median_3rd_third_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+		echo "delay_response_median_last2thirds_subtype:$delay_response_median_last2thirds_subtype" >> ${temp_folder}/${subj_nameonly}_calculations-temp_${file_type}.txt
+	done
+
+	###########################
+
+	###########################
+	# Extracting the processed data into variables
+	# Loop to go through each calculation file (for M-med, M-hi, reversal-med, reversal-hi)
+	for item in `ls ${temp_folder}/${subj_nameonly}_calculations-temp_*.txt`
+	do
+		# Getting the file type into a variable
+		file_type=`echo $item | sed 's!'${temp_folder}/${subj_nameonly}_calculations-temp_'!!' | sed 's/.txt//'`
+
+		# Getting the total number of all trials, regardless of mechanical level. This was calculated in STEP 01
+		trials_bothlevels_total_number=${trials_total_number}
+
+		# Checking the file being processed so the variables are named accordingly
+		if [ $file_type = M-med ]
+		then
+			# MEAN and MEDIAN extraction
+			# For TRIALS
+			mean_all_trials_M_med=`grep '^mean_all_trials:' $item  | sed 's/mean_all_trials://'`
+			median_all_trials_M_med=`grep '^median_all_trials:' $item  | sed 's/median_all_trials://'`
+
+			mean_1st_third_trials_M_med=`grep '^mean_1st_third_trials_subtype:' $item | sed 's/mean_1st_third_trials_subtype://'`
+			mean_2nd_third_trials_M_med=`grep '^mean_2nd_third_trials_subtype:' $item | sed 's/mean_2nd_third_trials_subtype://'`
+			mean_3rd_third_trials_M_med=`grep '^mean_3rd_third_trials_subtype:' $item | sed 's/mean_3rd_third_trials_subtype://'`
+			mean_last2thirds_trials_M_med=`grep '^mean_last2thirds_trials_subtype:' $item | sed 's/mean_last2thirds_trials_subtype://'`
+
+			median_1st_third_trials_M_med=`grep '^median_1st_third_trials_subtype:' $item | sed 's/median_1st_third_trials_subtype://'`
+			median_2nd_third_trials_M_med=`grep '^median_2nd_third_trials_subtype:' $item | sed 's/median_2nd_third_trials_subtype://'`
+			median_3rd_third_trials_M_med=`grep '^median_3rd_third_trials_subtype:' $item | sed 's/median_3rd_third_trials_subtype://'`
+			median_last2thirds_trials_M_med=`grep '^median_last2thirds_trials_subtype:' $item | sed 's/median_last2thirds_trials_subtype://'`
+
+			# For REVERSALS
+			mean_all_trials_reversal_M_med=`grep '^mean_reversal_all_trials:' $item  | sed 's/mean_reversal_all_trials://'`
+			median_all_trials_reversal_M_med=`grep '^median_reversal_all_trials:' $item  | sed 's/median_reversal_all_trials://'`
+
+			mean_reversal_1st_third_trials_M_med=`grep '^mean_reversal_1st_third_trials_subtype:' $item | sed 's/mean_reversal_1st_third_trials_subtype://'`
+			mean_reversal_2nd_third_trials_M_med=`grep '^mean_reversal_2nd_third_trials_subtype:' $item | sed 's/mean_reversal_2nd_third_trials_subtype://'`
+			mean_reversal_3rd_third_trials_M_med=`grep '^mean_reversal_3rd_third_trials_subtype:' $item | sed 's/mean_reversal_3rd_third_trials_subtype://'`
+			mean_reversal_last2thirds_trials_M_med=`grep '^mean_reversal_last2thirds_trials_subtype:' $item | sed 's/mean_reversal_last2thirds_trials_subtype://'`
+
+			median_reversal_1st_third_trials_M_med=`grep '^median_reversal_1st_third_trials_subtype:' $item | sed 's/median_reversal_1st_third_trials_subtype://'`
+			median_reversal_2nd_third_trials_M_med=`grep '^median_reversal_2nd_third_trials_subtype:' $item | sed 's/median_reversal_2nd_third_trials_subtype://'`
+			median_reversal_3rd_third_trials_M_med=`grep '^median_reversal_3rd_third_trials_subtype:' $item | sed 's/median_reversal_3rd_third_trials_subtype://'`
+			median_reversal_last2thirds_trials_M_med=`grep '^median_reversal_last2thirds_trials_subtype:' $item | sed 's/median_reversal_last2thirds_trials_subtype://'`
+
+			# REVERSALS data extraction
+			reversal_count_total_M_med=`grep '^reversal_count_total_subtype:' $item | sed 's/reversal_count_total_subtype://'`
+
+			reversal_count_1st_third_M_med=`grep '^reversal_count_1st_third_subtype:' $item | sed 's/reversal_count_1st_third_subtype://'`
+			reversal_count_2nd_third_M_med=`grep '^reversal_count_2nd_third_subtype:' $item | sed 's/reversal_count_2nd_third_subtype://'`
+			reversal_count_3rd_third_M_med=`grep '^reversal_count_3rd_third_subtype:' $item | sed 's/reversal_count_3rd_third_subtype://'`
+			reversal_count_last2thirds_M_med=`grep '^reversal_count_last2thirds_subtype:' $item | sed 's/reversal_count_last2thirds_subtype://'`
+
+			reversal_M_med_last=`grep '^reversal_subtype_last:' $item | sed 's/reversal_subtype_last://'`
+
+			# DELAY for response
+			# MEANS
+			delay_response_mean_all_trials_M_med=`grep '^delay_response_mean_all_trials_subtype:' $item | sed 's/delay_response_mean_all_trials_subtype://'`
+
+			delay_response_mean_1st_third_M_med=`grep '^delay_response_mean_1st_third_subtype:' $item | sed 's/delay_response_mean_1st_third_subtype://'`
+			delay_response_mean_2nd_third_M_med=`grep '^delay_response_mean_2nd_third_subtype:' $item | sed 's/delay_response_mean_2nd_third_subtype://'`
+			delay_response_mean_3rd_third_M_med=`grep '^delay_response_mean_3rd_third_subtype:' $item | sed 's/delay_response_mean_3rd_third_subtype://'`
+			delay_response_mean_last2thirds_M_med=`grep '^delay_response_mean_last2thirds_subtype:' $item | sed 's/delay_response_mean_last2thirds_subtype://'`
+
+			# MEDIANS
+			delay_response_median_all_trials_M_med=`grep '^delay_response_median_all_trials_subtype:' $item | sed 's/delay_response_median_all_trials_subtype://'`
+
+			delay_response_median_1st_third_M_med=`grep '^delay_response_median_1st_third_subtype:' $item | sed 's/delay_response_median_1st_third_subtype://'`
+			delay_response_median_2nd_third_M_med=`grep '^delay_response_median_2nd_third_subtype:' $item | sed 's/delay_response_median_2nd_third_subtype://'`
+			delay_response_median_3rd_third_M_med=`grep '^delay_response_median_3rd_third_subtype:' $item | sed 's/delay_response_median_3rd_third_subtype://'`
+			delay_response_median_last2thirds_M_med=`grep '^delay_response_median_last2thirds_subtype:' $item | sed 's/delay_response_median_last2thirds_subtype://'`
+
+			# QUALITATIVE data extraction
+			# Trials total number
+			trials_total_number_M_med=`grep '^trials_subtype_total_number:' $item  | sed 's/trials_subtype_total_number://'`
+
+			# REVERSALS total number
+			reversals_M_med_total_number=`grep '^reversal_subtype_total_number:' $item  | sed 's/reversal_subtype_total_number://'`
+
+			count_1st_third_M_med=`grep '^count_1st_third_subtype:' $item | sed 's/count_1st_third_subtype://'`
+			count_2nd_third_M_med=`grep '^count_2nd_third_subtype:' $item | sed 's/count_2nd_third_subtype://'`
+			count_3rd_third_M_med=`grep '^count_3rd_third_subtype:' $item | sed 's/count_3rd_third_subtype://'`
+
+			trial_number_M_med_1st_third_initial=`grep '^trial_number_1st_third_initial_subtype:' $item | sed 's/trial_number_1st_third_initial_subtype://'`
+			trial_number_M_med_1st_third_last=`grep '^trial_number_1st_third_last_subtype:' $item | sed 's/trial_number_1st_third_last_subtype://'`
+
+			trial_number_M_med_2nd_third_initial=`grep '^trial_number_2nd_third_initial_subtype:' $item | sed 's/trial_number_2nd_third_initial_subtype://'`
+			trial_number_M_med_2nd_third_last=`grep '^trial_number_2nd_third_last_subtype:' $item | sed 's/trial_number_2nd_third_last_subtype://'`
+
+			trial_number_M_med_3rd_third_initial=`grep '^trial_number_3rd_third_initial_subtype:' $item | sed 's/trial_number_3rd_third_initial_subtype://'`
+			trial_number_M_med_3rd_third_last=`grep '^trial_number_3rd_third_last_subtype:' $item | sed 's/trial_number_3rd_third_last_subtype://'`
+
+			trial_number_M_med_last2thirds_initial=`grep '^trial_number_last2thirds_initial_subtype:' $item | sed 's/trial_number_last2thirds_initial_subtype://'`
+			trial_number_M_med_last2thirds_last=`grep '^trial_number_last2thirds_last_subtype:' $item | sed 's/trial_number_last2thirds_last_subtype://'`
+
+		elif [ $file_type = M-hi ]
+		then
+			# MEAN and MEDIAN extraction
+			# For TRIALS
+			mean_all_trials_M_hi=`grep '^mean_all_trials:' $item  | sed 's/mean_all_trials://'`
+			median_all_trials_M_hi=`grep '^median_all_trials:' $item  | sed 's/median_all_trials://'`
+
+			mean_1st_third_trials_M_hi=`grep '^mean_1st_third_trials_subtype:' $item | sed 's/mean_1st_third_trials_subtype://'`
+			mean_2nd_third_trials_M_hi=`grep '^mean_2nd_third_trials_subtype:' $item | sed 's/mean_2nd_third_trials_subtype://'`
+			mean_3rd_third_trials_M_hi=`grep '^mean_3rd_third_trials_subtype:' $item | sed 's/mean_3rd_third_trials_subtype://'`
+			mean_last2thirds_trials_M_hi=`grep '^mean_last2thirds_trials_subtype:' $item | sed 's/mean_last2thirds_trials_subtype://'`
+
+			median_1st_third_trials_M_hi=`grep '^median_1st_third_trials_subtype:' $item | sed 's/median_1st_third_trials_subtype://'`
+			median_2nd_third_trials_M_hi=`grep '^median_2nd_third_trials_subtype:' $item | sed 's/median_2nd_third_trials_subtype://'`
+			median_3rd_third_trials_M_hi=`grep '^median_3rd_third_trials_subtype:' $item | sed 's/median_3rd_third_trials_subtype://'`
+			median_last2thirds_trials_M_hi=`grep '^median_last2thirds_trials_subtype:' $item | sed 's/median_last2thirds_trials_subtype://'`
+
+			# For REVERSALS
+			mean_all_trials_reversal_M_hi=`grep '^mean_reversal_all_trials:' $item  | sed 's/mean_reversal_all_trials://'`
+			median_all_trials_reversal_M_hi=`grep '^median_reversal_all_trials:' $item  | sed 's/median_reversal_all_trials://'`
+
+			mean_reversal_1st_third_trials_M_hi=`grep '^mean_reversal_1st_third_trials_subtype:' $item | sed 's/mean_reversal_1st_third_trials_subtype://'`
+			mean_reversal_2nd_third_trials_M_hi=`grep '^mean_reversal_2nd_third_trials_subtype:' $item | sed 's/mean_reversal_2nd_third_trials_subtype://'`
+			mean_reversal_3rd_third_trials_M_hi=`grep '^mean_reversal_3rd_third_trials_subtype:' $item | sed 's/mean_reversal_3rd_third_trials_subtype://'`
+			mean_reversal_last2thirds_trials_M_hi=`grep '^mean_reversal_last2thirds_trials_subtype:' $item | sed 's/mean_reversal_last2thirds_trials_subtype://'`
+
+			median_reversal_1st_third_trials_M_hi=`grep '^median_reversal_1st_third_trials_subtype:' $item | sed 's/median_reversal_1st_third_trials_subtype://'`
+			median_reversal_2nd_third_trials_M_hi=`grep '^median_reversal_2nd_third_trials_subtype:' $item | sed 's/median_reversal_2nd_third_trials_subtype://'`
+			median_reversal_3rd_third_trials_M_hi=`grep '^median_reversal_3rd_third_trials_subtype:' $item | sed 's/median_reversal_3rd_third_trials_subtype://'`
+			median_reversal_last2thirds_trials_M_hi=`grep '^median_reversal_last2thirds_trials_subtype:' $item | sed 's/median_reversal_last2thirds_trials_subtype://'`
+
+			# REVERSALS data extraction
+			reversal_count_total_M_hi=`grep '^reversal_count_total_subtype:' $item | sed 's/reversal_count_total_subtype://'`
+
+			reversal_count_1st_third_M_hi=`grep '^reversal_count_1st_third_subtype:' $item | sed 's/reversal_count_1st_third_subtype://'`
+			reversal_count_2nd_third_M_hi=`grep '^reversal_count_2nd_third_subtype:' $item | sed 's/reversal_count_2nd_third_subtype://'`
+			reversal_count_3rd_third_M_hi=`grep '^reversal_count_3rd_third_subtype:' $item | sed 's/reversal_count_3rd_third_subtype://'`
+			reversal_count_last2thirds_M_hi=`grep '^reversal_count_last2thirds_subtype:' $item | sed 's/reversal_count_last2thirds_subtype://'`
+
+			reversal_M_hi_last=`grep '^reversal_subtype_last:' $item | sed 's/reversal_subtype_last://'`
+
+			# DELAY for response
+			# MEANS
+			delay_response_mean_all_trials_M_hi=`grep '^delay_response_mean_all_trials_subtype:' $item | sed 's/delay_response_mean_all_trials_subtype://'`
+
+			delay_response_mean_1st_third_M_hi=`grep '^delay_response_mean_1st_third_subtype:' $item | sed 's/delay_response_mean_1st_third_subtype://'`
+			delay_response_mean_2nd_third_M_hi=`grep '^delay_response_mean_2nd_third_subtype:' $item | sed 's/delay_response_mean_2nd_third_subtype://'`
+			delay_response_mean_3rd_third_M_hi=`grep '^delay_response_mean_3rd_third_subtype:' $item | sed 's/delay_response_mean_3rd_third_subtype://'`
+			delay_response_mean_last2thirds_M_hi=`grep '^delay_response_mean_last2thirds_subtype:' $item | sed 's/delay_response_mean_last2thirds_subtype://'`
+
+			# MEDIANS
+			delay_response_median_all_trials_M_hi=`grep '^delay_response_median_all_trials_subtype:' $item | sed 's/delay_response_median_all_trials_subtype://'`
+
+			delay_response_median_1st_third_M_hi=`grep '^delay_response_median_1st_third_subtype:' $item | sed 's/delay_response_median_1st_third_subtype://'`
+			delay_response_median_2nd_third_M_hi=`grep '^delay_response_median_2nd_third_subtype:' $item | sed 's/delay_response_median_2nd_third_subtype://'`
+			delay_response_median_3rd_third_M_hi=`grep '^delay_response_median_3rd_third_subtype:' $item | sed 's/delay_response_median_3rd_third_subtype://'`
+			delay_response_median_last2thirds_M_hi=`grep '^delay_response_median_last2thirds_subtype:' $item | sed 's/delay_response_median_last2thirds_subtype://'`
+
+			# QUALITATIVE data extraction
+			# Trials total number
+			trials_total_number_M_hi=`grep '^trials_subtype_total_number:' $item  | sed 's/trials_subtype_total_number://'`
+
+			# REVERSALS total number
+			reversals_M_hi_total_number=`grep '^reversal_subtype_total_number:' $item  | sed 's/reversal_subtype_total_number://'`
+
+			count_1st_third_M_hi=`grep '^count_1st_third_subtype:' $item | sed 's/count_1st_third_subtype://'`
+			count_2nd_third_M_hi=`grep '^count_2nd_third_subtype:' $item | sed 's/count_2nd_third_subtype://'`
+			count_3rd_third_M_hi=`grep '^count_3rd_third_subtype:' $item | sed 's/count_3rd_third_subtype://'`
+
+			trial_number_M_hi_1st_third_initial=`grep '^trial_number_1st_third_initial_subtype:' $item | sed 's/trial_number_1st_third_initial_subtype://'`
+			trial_number_M_hi_1st_third_last=`grep '^trial_number_1st_third_last_subtype:' $item | sed 's/trial_number_1st_third_last_subtype://'`
+
+			trial_number_M_hi_2nd_third_initial=`grep '^trial_number_2nd_third_initial_subtype:' $item | sed 's/trial_number_2nd_third_initial_subtype://'`
+			trial_number_M_hi_2nd_third_last=`grep '^trial_number_2nd_third_last_subtype:' $item | sed 's/trial_number_2nd_third_last_subtype://'`
+
+			trial_number_M_hi_3rd_third_initial=`grep '^trial_number_3rd_third_initial_subtype:' $item | sed 's/trial_number_3rd_third_initial_subtype://'`
+			trial_number_M_hi_3rd_third_last=`grep '^trial_number_3rd_third_last_subtype:' $item | sed 's/trial_number_3rd_third_last_subtype://'`
+
+			trial_number_M_hi_last2thirds_initial=`grep '^trial_number_last2thirds_initial_subtype:' $item | sed 's/trial_number_last2thirds_initial_subtype://'`
+			trial_number_M_hi_last2thirds_last=`grep '^trial_number_last2thirds_last_subtype:' $item | sed 's/trial_number_last2thirds_last_subtype://'`
+		fi
+	done
+
+
+	# Outputing the results into a temporary file for the subject being processed
+	echo -e "${subj_nameonly}:${mean_all_trials_M_med}:${median_all_trials_M_med}:${mean_1st_third_trials_M_med}:${mean_2nd_third_trials_M_med}:${mean_3rd_third_trials_M_med}:${mean_last2thirds_trials_M_med}:${median_1st_third_trials_M_med}:${median_2nd_third_trials_M_med}:${median_3rd_third_trials_M_med}:${median_last2thirds_trials_M_med}:${mean_all_trials_reversal_M_med}:${median_all_trials_reversal_M_med}:${mean_reversal_1st_third_trials_M_med}:${mean_reversal_2nd_third_trials_M_med}:${mean_reversal_3rd_third_trials_M_med}:${mean_reversal_last2thirds_trials_M_med}:${median_reversal_1st_third_trials_M_med}:${median_reversal_2nd_third_trials_M_med}:${median_reversal_3rd_third_trials_M_med}:${median_reversal_last2thirds_trials_M_med}:${reversal_M_med_last}:${mean_all_trials_M_hi}:${median_all_trials_M_hi}:${mean_1st_third_trials_M_hi}:${mean_2nd_third_trials_M_hi}:${mean_3rd_third_trials_M_hi}:${mean_last2thirds_trials_M_hi}:${median_1st_third_trials_M_hi}:${median_2nd_third_trials_M_hi}:${median_3rd_third_trials_M_hi}:${median_last2thirds_trials_M_hi}:${mean_all_trials_reversal_M_hi}:${median_all_trials_reversal_M_hi}:${mean_reversal_1st_third_trials_M_hi}:${mean_reversal_2nd_third_trials_M_hi}:${mean_reversal_3rd_third_trials_M_hi}:${mean_reversal_last2thirds_trials_M_hi}:${median_reversal_1st_third_trials_M_hi}:${median_reversal_2nd_third_trials_M_hi}:${median_reversal_3rd_third_trials_M_hi}:${median_reversal_last2thirds_trials_M_hi}:${reversal_M_hi_last}:${delay_response_mean_all_trials_M_med}:${delay_response_median_all_trials_M_med}:${delay_response_mean_1st_third_M_med}:${delay_response_mean_2nd_third_M_med}:${delay_response_mean_3rd_third_M_med}:${delay_response_mean_last2thirds_M_med}:${delay_response_median_1st_third_M_med}:${delay_response_median_2nd_third_M_med}:${delay_response_median_3rd_third_M_med}:${delay_response_median_last2thirds_M_med}:${delay_response_mean_all_trials_M_hi}:${delay_response_median_all_trials_M_hi}:${delay_response_mean_1st_third_M_hi}:${delay_response_mean_2nd_third_M_hi}:${delay_response_mean_3rd_third_M_hi}:${delay_response_mean_last2thirds_M_hi}:${delay_response_median_1st_third_M_hi}:${delay_response_median_2nd_third_M_hi}:${delay_response_median_3rd_third_M_hi}:${delay_response_median_last2thirds_M_hi}:QUALITATIVE:${trials_bothlevels_total_number}:${trials_total_number_M_med}:${count_1st_third_M_med}:${count_2nd_third_M_med}:${count_3rd_third_M_med}:${trials_total_number_M_hi}:${count_1st_third_M_hi}:${count_2nd_third_M_hi}:${count_3rd_third_M_hi}:${reversals_M_med_total_number}:${reversals_M_hi_total_number}:${trial_number_M_med_1st_third_initial}:${trial_number_M_med_1st_third_last}:${trial_number_M_med_2nd_third_initial}:${trial_number_M_med_2nd_third_last}:${trial_number_M_med_3rd_third_initial}:${trial_number_M_med_3rd_third_last}:${trial_number_M_med_last2thirds_initial}:${trial_number_M_med_last2thirds_last}:${trial_number_M_hi_1st_third_initial}:${trial_number_M_hi_1st_third_last}:${trial_number_M_hi_2nd_third_initial}:${trial_number_M_hi_2nd_third_last}:${trial_number_M_hi_3rd_third_initial}:${trial_number_M_hi_3rd_third_last}:${trial_number_M_hi_last2thirds_initial}:${trial_number_M_hi_last2thirds_last}:" > ${temp_folder}/${subj_nameonly}_${LE_paradigm}_calculations_TEMP.txt
+
+	# Giving feedback to the user
+	echo
+	echo -e "Finished processing this subject"
+done
+
+# Adding headers to the FINAL OUTPUT FILE. Total of 91 fields
+echo -e "SubjID:Mean_M_med_all_trials:Median_M_med_all_trials:Mean_M_med_1st_third:Mean_M_med_2nd_third:Mean_M_med_3rd_third:Mean_M_med_last2thirds:Median_M_med_1st_third:Median_M_med_2nd_third:Median_M_med_3rd_third:Median_M_med_last2thirds:Mean_reversal_M_med_all_trials:Median_reversal_M_med_all_trials:Mean_reversal_M_med_1st_third:Mean_reversal_M_med_2nd_third:Mean_reversal_M_med_3rd_third:Mean_reversal_M_med_last2thirds:Median_reversal_M_med_1st_third:Median_reversal_M_med_2nd_third:Median_reversal_M_med_3rd_third:Median_reversal_M_med_last2thirds:Last_reversal_M_med:Mean_M_hi_all_trials:Median_M_hi_all_trials:Mean_M_hi_1st_third:Mean_M_hi_2nd_third:Mean_M_hi_3rd_third:Mean_M_hi_last2thirds:Median_M_hi_1st_third:Median_M_hi_2nd_third:Median_M_hi_3rd_third:Median_M_hi_last2thirds:Mean_reversal_M_hi_all_trials:Median_reversal_M_hi_all_trials:Mean_reversal_M_hi_1st_third:Mean_reversal_M_hi_2nd_third:Mean_reversal_M_hi_3rd_third:Mean_reversal_M_hi_last2thirds:Median_reversal_M_hi_1st_third:Median_reversal_M_hi_2nd_third:Median_reversal_M_hi_3rd_third:Median_reversal_M_hi_last2thirds:Last_reversal_M_hi:delay_response_mean_all_trials_M_med:delay_response_median_all_trials_M_med:delay_response_mean_1st_third_M_med:delay_response_mean_2nd_third_M_med:delay_response_mean_3rd_third_M_med:delay_response_mean_last2thirds_M_med:delay_response_median_1st_third_M_med:delay_response_median_2nd_third_M_med:delay_response_median_3rd_third_M_med:delay_response_median_last2thirds_M_med:delay_response_mean_all_trials_M_hi:delay_response_median_all_trials_M_hi:delay_response_mean_1st_third_M_hi:delay_response_mean_2nd_third_M_hi:delay_response_mean_3rd_third_M_hi:delay_response_mean_last2thirds_M_hi:delay_response_median_1st_third_M_hi:delay_response_median_2nd_third_M_hi:delay_response_median_3rd_third_M_hi:delay_response_median_last2thirds_M_hi:QUALITATIVE:Trials_total_number_all-levels:Trials_total_number_M_med:Trials_M_med_1st_third:Trials_M_med_2nd_third:Trials_M_med_3rd_third:Trials_total_number_M_hi:Trials_M_hi_1st_third:Trials_M_hi_2nd_third:Trials_M_hi_3rd_third:Reversals_M_med_total_number:Reversals_M_hi_total_number:Trial_total_number_M_med_1st_third_initial:Trial_total_number_M_med_1st_third_last:Trial_total_number_M_med_2nd_third_initial:Trial_total_number_M_med_2nd_third_last:Trial_total_number_M_med_3rd_third_initial:Trial_total_number_M_med_3rd_third_last:Trial_total_number_M_med_last2thirds_initial:Trial_total_number_M_med_last2thirds_last:Trial_total_number_M_hi_1st_third_initial:Trial_total_number_M_hi_1st_third_last:Trial_total_number_M_hi_2nd_third_initial:Trial_total_number_M_hi_2nd_third_last:Trial_total_number_M_hi_3rd_third_initial:Trial_total_number_M_hi_3rd_third_last:Trial_total_number_M_hi_last2thirds_initial:Trial_total_number_M_hi_last2thirds_last:" > $output_path/${LE_paradigm}_all-subjs_calculations.txt
+
+# Looping through all subjects calculations files
+for item in `ls ${temp_folder}/*_${LE_paradigm}_calculations_TEMP.txt`
+do
+	cat $item >> $output_path/${LE_paradigm}_all-subjs_calculations.txt
+done
+}
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/psychophys_processing
+######################################################################
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+# Asking input from the user
+echo -e "This script will perform calculations on the extracted raw data files for Lesser Evil paradigm"
+echo -e "and will export it into a text file"
+
+echo
+echo -en "Please enter the FULL PATH for the raw data files to be processed: "
+read raw_data_path
+
+# raw_data_path=/Users/moanae/psychophys_testing/input_LE_choice
+
+echo
+echo -en "Now enter the FULL PATH where to save the output files: "
+read output_path
+
+# output_path=/Users/moanae/psychophys_testing/output_LE_choice
+
+while [ 1 ]
+do
+	echo -e "\n"
+	echo -e "Choose which LE paradigm do you want to perform calculations:"
+	echo -en "(1) LE choice or (2) LE escape (enter \"1\" or \"2\"): "
+	read paradigm_choosen
+
+	if [ ${paradigm_choosen} = 1 ]
+	then
+		LE_paradigm=LE_CHOICE
+
+		break
+
+	elif [ ${paradigm_choosen} = 2 ]
+	then
+		LE_paradigm=LE_ESCAPE
+
+		break
+	else
+		echo
+		echo -en "No valid option - please choose between \"1\" or \"2\" "
+		sleep 2
+	fi
+done
+
+# Giving feedback to the user and asking for confirmation
+echo -e "\n"
+echo -e "This will process raw output files for the paradigm *** ${LE_paradigm} ***"
+echo -e "These are the text files contained within the raw data folder:\n"
+
+ls ${raw_data_path}/*.txt | sed 's!'${raw_data_path}'/!!' | sed "=" | sed 'N; s/\n/) /'
+
+echo
+echo -en "Is this correct? (y to proceed/n to abort): "
+read yesno
+
+if [ ${yesno} = y ] || [ ${yesno} = Y ]
+then
+	echo
+	echo -en "Processing files... "
+
+	if [ ${LE_paradigm} = LE_CHOICE ]
+	then
+		# Calling the function "LE_choice_processing" for processing
+		LE_choice_calculations
+
+	elif [ ${LE_paradigm} = LE_ESCAPE ]
+	then
+		# Calling the function "LE_choice_processing" for processing
+		LE_escape_calculations
+	fi
+else
+	exit
+fi
+
+echo -e "\n"
+echo -e "Finished processing for all subjects"
+echo -en "Press any key to exit "
+read -n1 anykey
+
+# Deleting all filed from the "/tmp" folder
+rm -rf ${temp_folder}

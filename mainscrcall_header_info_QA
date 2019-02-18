@@ -1,0 +1,1798 @@
+#! /bin/bash
+# Script to retrieve header info from the files for each subject and also extract statistics about each anatomical and functional files
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function timeseries_motion_outliers_processed {
+# Checking if user already ran the script "motion_outliers", as it is needed for this script to collect all relevant info on motion outliers
+# MAIN OUTPUT = Check if there subjects who did not have motion outliers check done, temporary file with all metrics for head motion for each timeseries file
+
+# Giving feedback to the user
+echo
+echo -e "#################################"
+echo -e "MOTION OUTLIER DETECTION check within FUNCTIONAL and/or RESTING BOLD folders for each subject"
+echo -e "Each timeseries file should have at least one motion outlier metric (e.g., DVARS) output file, as an indicator of motion outlier processing being done"
+
+# Creating a temporary file to hold the processing information for all subjects
+> ${temp_folder}/timeseries_motion_files_ALL-SUBJS.txt
+
+for SUBJ in ${SUBJLIST}
+do
+	# Checking how many FUNCTIONAL and/or RESTING BOLD files the subject has
+	for item in ${MODALITIES_PROCESSING_LIST}
+	do
+		if [ $item = func_BOLD ]
+		then
+			timeseries_type_folder=func
+			timeseries_type_filename=frun
+			timeseries_contrast=BOLD
+
+		elif [ $item = rest_BOLD ]
+		then
+			timeseries_type_folder=rest
+			timeseries_type_filename=resting
+			timeseries_contrast=BOLD
+
+		elif [ $item = func_ASL ]
+		then
+			timeseries_type_folder=func
+			timeseries_type_filename=frun
+			timeseries_contrast=ASL
+
+		elif [ $item = rest_ASL ]
+		then
+			timeseries_type_folder=rest
+			timeseries_type_filename=resting
+			timeseries_contrast=ASL
+		else
+			# This is to keep these variables empty when looping through image types not to be processed here (anatomical, DWI, resting ASL)
+			unset timeseries_type_folder timeseries_type_filename timeseries_contrast
+		fi
+
+		# Checking if the variables below have contents
+		if [ -n "${timeseries_type_folder}" ] && [ -n "${timeseries_type_filename}" ] && [ -n "${timeseries_contrast}" ]
+		then
+			###### Comparing how many timeseries to number of motion outlier files #######
+			# Counting # of timeseries run folders. Note the parameters for the "ls" command: "-d" to list directories, "-1" to list one folder per line, and "-r" to list them in reverse order
+			timeseries_folders_number=`ls -1dr ${SUBJS_FOLDERS_PATH}/${SUBJ}/${timeseries_type_folder}/${timeseries_type_filename}*_${timeseries_contrast}* 2> /dev/null | wc -l`
+
+			# Counting # of "*_OUTLIERS_*_processinfo.txt" files
+			OUTLIERS_files_number=`ls -1r ${SUBJS_FOLDERS_PATH}/${SUBJ}/${timeseries_type_folder}/${timeseries_type_filename}*_${timeseries_contrast}*/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_*_processinfo.txt 2> /dev/null | wc -l`
+
+			# Testing to see if the number of OUTLIERS process info is equal or greater (in case of more than 1 metric from fsl_motion_outliers) than the number of functional run folders - if not, the user should run the "motion_outliers" script. If yes, just move on
+			if [ ${timeseries_folders_number} -gt 0 ] && [ ${OUTLIERS_files_number} -lt ${timeseries_folders_number} ] # Check if number of functional folders is greater than zero, and if the number of outlier files is less than the number of timeseries files
+			then
+				# Signaling that this subject did not have matching numbers, so it can be added to a variable outside the for loop (otherwise will show the same subject more than once)
+				subj_match=no
+
+			elif [ ${timeseries_folders_number} -gt 0 ] && [ ${OUTLIERS_files_number} -ge ${timeseries_folders_number} ] # Check if number of functional folders is greater than zero, and if the number of outlier files is equal or greater than the number of timeseries files
+			then
+				# Signaling that the subject had at least one functional run and its number mathces the number of outliers files
+				subj_match=yes
+			fi
+			##############################################################################
+
+			##### Gathering the information for each run for each subject into a temporary file ########
+			# Getting timeseries files list into a variable
+			timeseries_folders_list=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/${timeseries_type_folder}/${timeseries_type_filename}*_${timeseries_contrast}* 2> /dev/null`
+
+			for item in ${timeseries_folders_list}
+			do
+				# Gathering the timeseries file name and the metrics available into variables
+				timeseries_file=`ls ${item}/*_stdMNI.nii.gz 2> /dev/null | sed s'!'${item}/'!!'`
+				motion_metrics=`ls ${item}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_*_processinfo.txt 2> /dev/null | awk 'BEGIN {FS="_"} { print ( $(NF-1) ) }' | sed 's/\n/ /'`
+
+				################
+				# Adding this timeseries file info for the subject being processed to the temporary file
+				echo -e "Motion_metrics:`echo ${motion_metrics}`:Filename:${timeseries_file}" >> ${temp_folder}/timeseries_motion_files_ALL-SUBJS.txt
+				################
+			done
+		fi
+	done
+
+	# Checking if this variable is not empty (when processing ASL and DWI files) AND that the subject did not have the same number of timeseries and motion outlier files
+	if [ -n "${subj_match}" ] && [ ${subj_match} = no ]
+	then
+		# Holding into a variable all subjects who failed the test above
+		SUBJ_no_match="${SUBJ_no_match} ${SUBJ}"
+	fi
+
+	# Cleaning the contents of variable below
+	unset subj_match
+done
+
+if [ -n "$SUBJ_no_match" ]
+then
+	echo
+	echo -e "*** WARNING - There are less \"OUTLIERS\" files than the number of functional run folders ***"
+	echo -e "\n\tSubjects affected are: \n${SUBJ_no_match}\n"
+
+	echo -e "\tIt is possible that outliers detection has not been ran yet"
+	echo -e "\t*** Please check this by looking at the temporary files with the list of all subjects and their motion metric files, available here: ${temp_folder}/SUBJID_timeseries_motion_files.txt ***"
+	echo -e "If needed, run the motion outliers detection (option \"1d\" in PROCESSING MENU)\n"
+
+	echo -e "\tPress any key to continue, or press control+C to back to the PROCESSING MENU"
+	echo -en "#################################"
+
+	read -n 1 anykey
+else
+	echo
+	echo -e "No discrepancies found. Moving on..."
+	echo -en "#################################"
+
+	sleep 1
+fi
+}
+
+function number_volumes_images {
+# Getting data on number of volumes for runs with more than 1 volume (stimulus-evoked / resting-state BOLD and ASL, DWI) - to check if the run is valid or not (less volumes than expected)
+# MAIN OUTPUT: 1. Number of volumes for each image modality as informed by user; 2. Reference volume to be used by MCFLIRT; 3. Number of processes to be run by PPSS
+
+echo -e "\n"
+echo -e "\t\t\t\t***** WARNING *****"
+echo -e "It is CRUCIAL for the correct functioning of this program that you provide an accurate number below"
+echo -e "If needed, you can enter this command in your terminal to gather it - \"fslval <image filename> dim4\""
+
+echo
+echo
+echo -e "### This script will need to use PPSS to do parallel processing, so please choose the number of parallel processes allowed ###"
+
+# FUNCTION CALL: calling the function "number_processors_RAM_available" to determine how many processors to be used and amount of RAM memory available
+number_processors_RAM_available
+
+# Looping through all modalities chosen by user
+for item in ${MODALITIES_PROCESSING_LIST}
+do
+	# If statement to exclude anatomical files from processing here
+	if [ ${item} != anatomical ]
+	then
+		while [ 1 ]
+		do
+			echo
+			echo -e "### ${item} ### images"
+			echo -en "Please enter the total number of VOLUMES (=TRs) originally collected (# of TRs collected at the scanner): "
+			read number_timepoints_user
+
+			# Checking if this is a timeseries run
+			if [ $item = func_BOLD ] || [ $item = rest_BOLD ] || [ $item = func_ASL ] || [ $item = rest_ASL ]
+			then
+				###########################
+				##### MCFLIRT options #####
+				# Allowing the user to choose the reference volume for MCFLIRT
+				echo
+				echo -e "If needed, motion correction will be performed by MCFLIRT tool"
+				echo -e "A reference image is needed for motion correction. The DEFAULT is is \"number of volumes / 2\") - registers to (n+1)th volume in series. In other words, \"middle volume # + 1\""
+
+				echo
+				echo -en "DO you want to (1) use the DEFAULT, or (2) enter another volume to be used as reference? "
+				read motion_target_user
+
+				while [ 1 ]
+				do
+					if [ -n "${motion_target_user}" ] && [ ${motion_target_user} = 1 ]
+					then
+						motion_target_vol_temp="DEFAULT"
+
+						break
+
+					elif [ -n "${motion_target_user}" ] && [ ${motion_target_user} = 2 ]
+					then
+						while [ 1 ]
+						do
+							echo
+							echo -en "Please enter a number between \"0\" and \"${number_timepoints_user}\" (remember that the target volume will be this number + 1): "
+							read motion_target_vol_temp_user
+
+							if [ -n "${motion_target_vol_temp_user}" ] && [ ${motion_target_vol_temp_user} -ge 0 ] && [ ${motion_target_vol_temp_user} -le ${number_timepoints_user} ] # Checks if this variable is NOT empty, and if it is equal or greater than zero and equal or less than the total number of volumes for this imaging modality entered by the user
+							then
+								echo
+								echo -en "Confirm using this as target volume = \"`echo ${motion_target_vol_temp_user} + 1 | bc`\" ? (y/n) "
+								read yesno
+
+								if [ -n "${yesno}" ] && [ ${yesno} = y ]
+								then
+									# Entering the value entered by the user into the variable to be used by MCFLIRT
+									motion_target_vol_temp=${motion_target_vol_temp_user}
+
+									# Breaking from the outer loop (using parameter "2" for break). This is enough to get out of both "while" loops
+									break 2
+
+								elif [ -n "${yesno}" ] && [ ${yesno} = n ]
+								then
+									echo
+									echo -en "Please correct the volume to used "
+
+									sleep 2
+								else
+									echo
+									echo -en "Please enter \"y\" or \"n\" only. "
+
+									sleep 2
+								fi
+							else
+								echo
+								echo -en "Not a valid number. Please re-enter another number. "
+
+								sleep 2
+							fi
+						done
+					else
+						echo
+						echo -en "Please enter \"1\" or \"2\" "
+
+						sleep 2
+					fi
+				done
+				###########################
+			fi
+
+			echo
+			echo -e "You entered:"
+			echo -e "Total of volumes for ${item} = ${number_timepoints_user}"
+
+			# Checking if this is a timeseries run
+			if [ $item = func_BOLD ] || [ $item = rest_BOLD ] || [ $item = func_ASL ] || [ $item = rest_ASL ]
+			then
+				echo -e "Reference volume for MCFLIRT = ${motion_target_vol_temp}"
+			fi
+
+			echo -en "Is this correct?(y/n) "
+			read yesno
+
+			if [ $yesno = y ] || [ $yesno = Y ]
+			then
+				# Checking which modality was processed, in order to name the variable holding the number of volumes accordingly
+				if [ ${item} = DWI ]
+				then
+					number_timepoints_DWI=${number_timepoints_user}
+
+					break
+
+				elif [ ${item} = func_BOLD ]
+				then
+					number_timepoints_func_BOLD=${number_timepoints_user}
+
+					# Checking if it will use the default ref volume or not
+					if [ ${motion_target_vol_temp} = DEFAULT ]
+					then
+						motion_target_vol_func_BOLD=""
+					else
+						motion_target_vol_func_BOLD=${motion_target_vol_temp}
+					fi
+
+					break
+
+				elif [ ${item} = rest_BOLD ]
+				then
+					number_timepoints_rest_BOLD=${number_timepoints_user}
+
+					# Checking if it will use the default ref volume or not
+					if [ ${motion_target_vol_temp} = DEFAULT ]
+					then
+						motion_target_vol_rest_BOLD=""
+					else
+						motion_target_vol_rest_BOLD=${motion_target_vol_temp}
+					fi
+
+
+					break
+
+				elif [ ${item} = func_ASL ]
+				then
+					number_timepoints_func_ASL=${number_timepoints_user}
+
+					# Checking if it will use the default ref volume or not
+					if [ ${motion_target_vol_temp} = DEFAULT ]
+					then
+						motion_target_vol_func_ASL=""
+					else
+						motion_target_vol_func_ASL=${motion_target_vol_temp}
+					fi
+
+					break
+
+				elif [ ${item} = rest_ASL ]
+				then
+					number_timepoints_rest_ASL=${number_timepoints_user}
+
+					# Checking if it will use the default ref volume or not
+					if [ ${motion_target_vol_temp} = DEFAULT ]
+					then
+						motion_target_vol_rest_ASL=""
+					else
+						motion_target_vol_rest_ASL=${motion_target_vol_temp}
+					fi
+
+					break
+				fi
+			else
+				echo -e "\n"
+				echo -e "Please correct the information\n"
+			fi
+		done
+	fi
+done
+}
+
+function header_info_raw {
+# MAIN OUTPUT: Extract the header info for each image file using the FSL tool "fslhd", and output it to a text file
+
+for SUBJ in ${SUBJLIST}
+do
+	# Providing feedback to the user
+	echo
+	echo -e "\tCollecting header info for files for subject \"${SUBJ}\""
+
+	# Initiating the text file to hold all the header info - THIS INFO WILL NOT BE PRESENTED TO THE USER
+	# Collecting the detailed data
+	echo -e "This file contains header information from image files for subject \"${SUBJ}\"\n" > ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_header_info_detailed.txt
+
+	# Notice the call for function "current_date_time" from functionslibr_FSL, to output the date and time. Using parameter "2" so there are no semicolons.
+	echo -e "Information collected on `current_date_time 2`, in this computer \"${HOSTNAME}\" by the local user \"${USER}\"\n" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_header_info_detailed.txt
+
+	# Looping through the image modalities list as chosen by the user.
+	for item1 in ${MODALITIES_PROCESSING_LIST}
+	do
+		# Checking the image modality being processed
+		if [ ${item1} = anatomical ]
+		then
+			# Variables holding the modality folder name and file name identifier
+			modality_folder_name=anat
+			modality_file_name=anat
+
+			# Collecting the image "filename" available for this subject.
+			files_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/*_${modality_file_name}_*_orig.nii.gz 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/'!!'`
+
+		elif [ ${item1} = func_BOLD ] || [ ${item1} = rest_BOLD ] || [ ${item1} = func_ASL ] || [ ${item1} = rest_ASL ] || [ ${item1} = DWI ]
+		then
+			if [ ${item1} = DWI ]
+			then
+				# Variables holding the modality folder name and file name identifier
+				modality_folder_name=${item1}
+				modality_subfolder_file_name=${item1}
+			else
+				# Gathering what image modality is being processed, in order to create variables holding the modality folder name and file name identifier
+				modality_folder_name=`echo ${item1} | awk -F_ '{print $1}'`
+				modality_subfolder_file_name=`echo ${item1} | awk -F_ '{print $2}'`
+			fi
+
+			# Creating folders list variable - It includes the "fieldmap" images folders in order to include their header info
+			folders_list=`ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name} 2> /dev/null`
+
+			# Looping through each folder, to collect the "subfolder/filename" into a variable
+			for folder in ${folders_list}
+			do
+				# Collecting the respetive image file within each modality folder available for this subject.
+				files_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/*${modality_subfolder_file_name}*/*_${modality_subfolder_file_name}*_orig.nii.gz 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/'!!'`
+			done
+		fi
+
+		# Checking if the variable "files_list" has content
+		if [ -n "${files_list}" ]
+		then
+			# Looping through all available image files for this subject.
+			for item2 in ${files_list}
+			do
+				echo -e "This is the detailed header info for this file: ${item2}" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_header_info_detailed.txt
+
+				# Using the FSL tool "fslhd" to get the header info from the image files
+				fslhd ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${item2} >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_header_info_detailed.txt
+				echo >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_header_info_detailed.txt
+			done
+
+		elif [ -z "${files_list}" ] # Warning the user in case this variable is empty
+		then
+			echo
+			echo -e "*** WARNING *** There are no ${item1} files listed for subject \"${SUBJ}\" ***"
+			echo -e "*** Please check it before re-running this script ***\n"
+
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+	done
+
+	echo -e "\tDone collecting header info for subject \"${SUBJ}\"\n"
+
+	# Cleaning the contents of the variable below
+	unset files_list
+done
+}
+
+function output_file {
+# This function creates the output text file that will hold all the extracted data later on by other functions
+# MAIN OUTPUT: Initiate the text file that will hold the output of various other functions called previously. The output is = descriptive statistics + head motion info for the subject's images
+
+#### This function has to be run within a for loop of all subjects to be processed #####
+
+#######################################################################################
+##### CREATING THE OUTPUT TEXT FILE WITH HEADERS ACCORDING TO THE IMAGES PROCESSED ####
+#######################################################################################
+
+# Checking the computer's operational system, extracting the computer and OS system information
+if [ `uname -s` = Darwin ] # if this is a computer using Mac OS X
+then
+	# Gathering the computer and OS system information into variables
+	local computer_name=`system_profiler SPSoftwareDataType | grep "Computer Name" | awk -F: '{print $2}'`
+	local user_name=`system_profiler SPSoftwareDataType | grep "User Name" | awk -F: '{print $2}'`
+
+	local OS_installed=`sw_vers -productName; sw_vers -productVersion`
+	FSL_version=`cat $FSLDIR/etc/fslversion`
+else
+	# Gathering the computer and OS system information into variables
+	local computer_name=unknown
+	local user_name=unknown
+
+	local OS_installed=unknown
+	FSL_version=`cat $FSLDIR/etc/fslversion`
+fi
+
+# Initiating the output text file to hold all the descriptive stats - THIS INFO WILL NOT BE PRESENTED TO THE USER
+echo -e "This file contains descriptive statistics from image files for subject \"${SUBJ}\"" > ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+
+echo -e "Tools used are \"fslval\" and \"fslstats\" from FSL, which allows you to pull out info from the header of the image file (fslval) and descriptive stats (fslstats)\n" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+
+echo -e "Information collected on `current_date_time 2`, computer \"${computer_name}\", user \"${user_name}\", OS \"`echo ${OS_installed}`\", FSL version \"${FSL_version}\" \n" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+
+# Cleaning the contents of variables below to prevent carry over its values from previous loops
+unset metrics_header_temp metrics_header header_anat_empty
+
+###### STEPS TO CREATE HEADERS FOR THE OUTPUT FILE ########
+##### STEP 1 #####
+# Gathering the metrics for head motion from the temporary text file created by the function "motion_outliers_process_check" above
+OLD_IFS=$IFS      # save the field separator
+IFS=$'\n'     # new field separator, the end of line
+
+# Creating an empty variable to hold the metrics available in the loop below
+metrics_previous=""
+metrics_current=""
+
+# Loop to check how many head motion metrics each timeseries files has; it will keep the most numerous metrics to generate the headers for the output file accordingly
+for item in `grep ${SUBJ} ${temp_folder}/timeseries_motion_files_ALL-SUBJS.txt | awk -F: '{print $2}'`
+do
+	# Checking if the variable "metrics_previous" is not empty, and if so if it is equal to the variable "item"
+	if [ -n "${metrics_previous}" ] && [ ${metrics_previous} = ${item} ]
+	then
+		# Since the previous metrics were equal to the one being processed, this will keep the metrics being processed as the ones to be used later
+		metrics_current=${item}
+
+	# Checking if the variable "metrics_previous" is not empty, and if so if it is greater than the variable "item"
+	elif [ -n "${metrics_previous}" ] && [ ${metrics_previous} \> ${item} ]
+	then
+		# Since the previous metrics values are greater than the one being processed, will keep the old value
+		metrics_current=${metrics_previous}
+
+	# Checking if this variable is empty, i.e., in the first looping
+	elif [ -z "${metrics_previous}" ]
+	then
+		# In this case, it will make the current metrics being processed into previous for the next looping
+		metrics_previous=${item}
+	fi
+done
+
+# Consolidating the greatest number of metrics into a variable to be use to generate the headers for the output file
+metrics_available=${metrics_current}
+
+IFS=$OLD_IFS     # restore default field separator
+##################
+
+##### STEP 2 #####
+######### Creating a text file to hold all the METRICS INFORMATION collected below #########
+> ${temp_folder}/${SUBJ}/metric_header_${SUBJ}.txt
+
+##################
+
+##### STEP 3 #####
+#### Creating the headers for the output file now #####
+# Loop to create the headers necessary for each metric available. Also create the empty header spaces related to motion parameters for files with no motion outliers output
+# Creating a variable holding 15 empty spaces for ANATOMICAL header
+header_empty_spaces_temp=-:-:-:-:-:-:-:-:-:-:-:-:-:-:-:
+
+for item in ${metrics_available}
+do
+	echo "${item}_deleted_vols:${item}_values_min:${item}_values_max:${item}_outliers_threshold:${item}_outliers_quantity:${item}_outliers_TR:" >> ${temp_folder}/${SUBJ}/metric_header_${SUBJ}.txt
+
+	# Adding the additional empty spaces to the files with no motion outliers output relative to the metrics motion (6 per metric)
+	header_empty_spaces_temp="${header_empty_spaces_temp}-:-:-:-:-:-:"
+done
+##################
+
+##### STEP 4 #####
+# Now collecting all the metrics information from the files created above into the final variable to be outputed
+for item in `cat ${temp_folder}/${SUBJ}/metric_header_${SUBJ}.txt`
+do
+	metrics_header_temp="${metrics_header_temp}${item}"
+done
+##################
+
+##### STEP 5 #####
+# Adding the common outliers space to the header, as well as the number of deleted volumes for motion outliers detection. Note the abscence of semicolon between the variable "metrics_header_temp" and the next header, as the variable already contains the semicolon.
+metrics_header="${metrics_header_temp}outliers_fd_dvars_common:# of common outlier TRs"
+##################
+
+##### STEP 6 #####
+# Adding 2 more empty spaces to the header for files with no motion outliers output for the variables holding: 1. the common outliers found, and 2. how many outliers. This has to be added latter as it does not vary according to the number of metrics, thus it cannot be part of the loop above to create the headers for each metric available.
+HEADER_EMPTY_SPACES="${header_empty_spaces_temp}-:-:"
+##################
+
+##### STEP 7 - FINAL #####
+# Creating the HEADER TAGS for the descriptive stats file
+echo -e "SubjectID:Image Filename:Path to file:Image type:Image contrast:Voxel unit:Time unit:# of time points:TR:TE:flip angle:Voxel dim X:Voxel dim Y:Voxel dim Z:Image dim X:Image dim Y:Image dim Z:MCFLIRT reference volume #:Motion absolute (mm) - Mean:Std Dev:Median:Min:TRmin:Max:TRmax:Motion relative (mm) - Mean:Std Dev:Median:Min:TRmin:Max:TRmax:${metrics_header}:Absolute Intensity - Min:Max:mean:Std Dev:Robust intensity Min:Max:mean non-zero:Std Dev non-zero:Voxels per volume absolute:Voxels per volume non-zero:Area per volume absolute:Area per volume non-zero:" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+##################
+}
+
+function header_info_processed {
+# This function will extract the detailed header information using FSL tools to parse them out
+
+# COLLECTING DESCRIPTIVE STATS FROM THE HEADER OF IMAGE FILES INTO VARIABLES
+# This function will use the tool "fslval" and "fslstats "from FSL, which allows you to pull out info from the header of the image file (fslval) and descriptive stats (fslstats)
+
+# It uses 3 parameters:
+	# 1) The type of image being processed
+	# 2) The filename without the subject ID
+	# 3) The full path to the image file being processed
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+local image_type="$1" # Type of image being processed
+local image_filename="$2" # Filename without the subject ID
+local image_file_fullpath="$3" # Full path to the image file being processed
+
+# Giving feedback to the user
+echo -e "\n"
+echo -e "Collecting detailed header info"
+echo -e "\tImage type being processed: ${image_type}"
+echo -e "\tImage file name: ${image_filename}"
+
+echo
+echo -en "\tCollecting data from NIFTI header of image using \"fslval\" tool "
+
+# Number of timepoints for this image
+number_time_points=`fslval ${image_file_fullpath} dim4`
+
+# Units used
+voxel_unit=`fslval ${image_file_fullpath} vox_units`
+time_unit=`fslval ${image_file_fullpath} time_units`
+
+# TR, TE and flip angle values
+TR_TE_FA_values=`fslval ${image_file_fullpath} descrip | sed 's!/! !g'` # Getting the values from the "descrip" field from the NIFTI file, and transforming the forward slash into space separation between items
+
+# Creating a variable with no spaces to check if it has contents
+TR_TE_FA_values_NOSPACES=`echo ${TR_TE_FA_values} | sed 's! !!g'`
+
+# Checking if the variable "TR_TE_FA_values" has contents (DWI images might have the "descript" header field empty)
+if [ X${TR_TE_FA_values_NOSPACES} != X ] && [ X${TR_TE_FA_values_NOSPACES} != XFSL5.0 ] # Tests if this variable is not empty (1st test), AND if it's not a DWI image, wherethe variable value will be "FSL5.0)
+then
+	# Loop to put these values in a text file to later extract with sed
+	for item in $TR_TE_FA_values
+	do
+		echo $item >> ${temp_folder}/${SUBJ}/TR_TE_FA_values.txt
+	done
+
+	# Extracting the values using sed from the text files
+	TR_value=`grep TR ${temp_folder}/${SUBJ}/TR_TE_FA_values.txt | sed 's/TR=//'`
+	TE_value=`grep TE ${temp_folder}/${SUBJ}/TR_TE_FA_values.txt | sed 's/TE=//'`
+	FA_value=`grep FA ${temp_folder}/${SUBJ}/TR_TE_FA_values.txt | sed 's/FA=//'`
+
+	rm ${temp_folder}/${SUBJ}/TR_TE_FA_values.txt # Deleting the created file so there won't be confusion with the file to be created for other images to be processed
+else
+	# In this case, the variable "TR_TE_FA_values" is empty thus will assign dashes for the individual variables
+	TR_value="Not available"
+	TE_value="Not available"
+	FA_value="Not available"
+fi
+
+# Voxel dimensions in X,Y and Z planes
+voxel_dim_X=`fslval ${image_file_fullpath} pixdim1`
+voxel_dim_Y=`fslval ${image_file_fullpath} pixdim2`
+voxel_dim_Z=`fslval ${image_file_fullpath} pixdim3`
+
+# Image dimensions in X,Y and Z planes
+image_dim_X=`fslval ${image_file_fullpath} dim1`
+image_dim_Y=`fslval ${image_file_fullpath} dim2`
+image_dim_Z=`fslval ${image_file_fullpath} dim3`
+
+###### Step 2 - Collecting voxels data from image using \"fslstats\" tool ######
+echo
+echo -en "\tCollecting voxels data from image using \"fslstats\" tool "
+
+# Collecting the descriptive stats from images into variables
+min_absolute_intensity=`fslstats ${image_file_fullpath} -R | awk '{print$1}'`
+max_absolute_intensity=`fslstats ${image_file_fullpath} -R | awk '{print$2}'`
+
+##### CONSIDER CREATING A VARIABLE TO HOLD THE DIFFERENCES BETWEEN MIN AND MAX INTENSITY VALUES
+
+min_robust_intensity=`fslstats ${image_file_fullpath} -r | awk '{print$1}'`
+max_robust_intensity=`fslstats ${image_file_fullpath} -r | awk '{print$2}'`
+
+voxels_per_volume_absolute=`fslstats -t ${image_file_fullpath} -v | sed -n '1p' | awk '{print$1}'` # Since the "-t" parameter for fslstats will print values for each volume, the sed command issued will separate only the first line of values (for 1st volume, which is similar to all other volumes)
+area_per_volume_absolute=`fslstats -t ${image_file_fullpath} -v | sed -n '1p' | awk '{print$2}'`
+
+voxels_per_volume_nonzero=`fslstats -t ${image_file_fullpath} -V | sed -n '1p' | awk '{print$1}'` # Since the "-t" parameter for fslstats will print values for each volume, the sed command issued will separate only the first line of values (for 1st volume, which is similar to all other volumes)
+area_per_volume_nonzero=`fslstats -t ${image_file_fullpath} -V | sed -n '1p' | awk '{print$2}'`
+
+mean_4D_absolute=`fslstats ${image_file_fullpath} -m`
+Std_Dev_absolute=`fslstats ${image_file_fullpath} -s`
+
+mean_4D_nonzero=`fslstats ${image_file_fullpath} -M`
+Std_Dev_nonzero=`fslstats ${image_file_fullpath} -S`
+}
+
+function timeseries_motion_mcflirt {
+# This function will check if MCFLIRT was already ran for timeseries BOLD images (functional and resting), and if not it will do so here using PPSS to do parallel processing
+#### MAIN TASKS ####
+# 1. Check if MCFLIRT was already ran for timeseries BOLD images (functional and resting)
+# 2. If needed, run MCFLIRT for timeseries images using PPSS for parallel processing
+
+##### MAIN OUTPUT ######
+# Motion parameter output files
+
+# It uses 3 parameters:
+	# 1) The name of the modality of image being processed (func, rest)
+	# 2) The name of the corresponding subfolder for the image file being processed (frun, resting)
+	# 3) The type of contrast (BOLD)
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+local modality_folder_name="$1" # Type of image being processed
+local modality_subfolder_name="$2" # The name of the corresponding subfolder for the image file being processed
+local modality_contrast="$3" # The name of the corresponding subfolder for the image file being processed
+
+# Loop to process all subjects
+for SUBJ in ${SUBJLIST}
+do
+	# Collecting relevant files available for this subject.
+	timeseries_folders_list=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}*_${modality_contrast}* 2> /dev/null`
+
+	for timeseries_folder in ${timeseries_folders_list}
+	do
+		# CHECK 01: Checking if the folder "QA_motion" was already created, as a result of running the script "motion_outliers", since this is where the output of MCFLIRT will be saved
+		folder_QA_motion=`ls -d ${timeseries_folder}/${QA_main_folder} 2> /dev/null`
+
+		# Collecting the TIMESERIES file within each frun folder available for this subject.
+		timeseries_file=`ls ${timeseries_folder}/*_orig.nii.gz 2> /dev/null | sed 's!'${timeseries_folder}/'!!'`
+
+		# Taking the "_orig.nii.gz" from the file name
+		timeseries_file_noextension=`echo ${timeseries_file} | sed 's/_orig.nii.gz//'`
+
+		if [ -n "$folder_QA_motion" ] && [ -d "$folder_QA_motion" ] # Checking if the contents of the variable "folder_QA_motion" are different than zero in lenght and if it is a directory
+		then
+			# CHECK02: Checking if MCFLIRT was already ran, so to avoid re-running here. These files are 2 of the several mcflirts outputs, so hopefully if they are found it means that mcflirt does not need to be run again.
+			motion_mcflirt_file01=`ls ${timeseries_folder}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs.rms 2> /dev/null`
+			motion_mcflirt_file02=`ls ${timeseries_folder}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel.rms 2> /dev/null`
+
+			if [ -f "$motion_mcflirt_file01" ] && [ -f "$motion_mcflirt_file02" ] # Checking if both files exists
+			then
+				# Variable "motion_mcflirt_run" to be used to determine if MCFLIRt was already ran for this functional run, i.e. does it need to be run here
+				motion_mcflirt_run=no
+			else
+				# Variable "motion_mcflirt_run" to be used to determine if MCFLIRT was already ran for this functional run, i.e. does it need to be run here
+				motion_mcflirt_run=yes
+			fi
+		else
+			# In this case there is no QA_motion folder within this functional run's folder thus mcflirt will be not run as there is no output folder for it. It asks the user to check it anyway
+			echo -e "\n"
+			echo -e "##### WARNING #####"
+			echo -e "### This timeseries file has no \"${QA_main_folder}\" folder! ####"
+			echo -e "Folder name: ${timeseries_folder}"
+			echo -e "This folder is needed to hold the output of the MCFLIRT program\n"
+
+			echo -e "Please check if the script \"motion_outliers\" was ran for this timeseries file"
+			echo -e "This run will be skipped from processing here\n"
+
+			echo -en "Press any key to continue "
+			read anykey
+
+			# Variable "motion_mcflirt_run" to be used to determine if MCFLIRt was already ran for this functional run, i.e. does it need to be run here. Since There is no "QA_motion" folder, this variable will flag this run not to be processed.
+			motion_mcflirt_run=no
+		fi
+
+		# Checking if the variable "timeseries_file" has content, i.e., the file name for the timeseries file, AND if all other CHECKS above were ok
+		if [ -n "${timeseries_file}" ]
+		then
+			## CHECK03: Checking if this is a complete run, i.e. the number of TRs of it is the same as the one entered by the user previously
+			## Also gathering the reference volume for a specifici timeseries type into a common variable for later processing.
+
+			# Number of timepoints for this image
+			number_timepoints_file_process=`fslval ${timeseries_folder}/${timeseries_file} dim4`
+
+			# Checking the type of timeseries and the contrast to gather the correct number of TRs as entered by user in the function "number_volumes_images"
+			if [ ${modality_folder_name} = func ] && [ ${modality_contrast} = BOLD ]
+			then
+				# Gathering the number of TRs for the correct timeseries type as entered by user into a variable
+				number_timepoints_user_entered=${number_timepoints_func_BOLD}
+
+				# Gathering the reference volume for this timeseries type
+				motion_target_vol=${motion_target_vol_func_BOLD}
+
+			elif [ ${modality_folder_name} = rest ] && [ ${modality_contrast} = BOLD ]
+			then
+				# Gathering the number of TRs for the correct timeseries type as entered by user into a variable
+				number_timepoints_user_entered=${number_timepoints_rest_BOLD}
+
+				# Gathering the reference volume for this timeseries type
+				motion_target_vol=${motion_target_vol_rest_BOLD}
+
+			elif [ ${modality_folder_name} = func ] && [ ${modality_contrast} = ASL ]
+			then
+				# Gathering the number of TRs for the correct timeseries type as entered by user into a variable
+				number_timepoints_user_entered=${number_timepoints_func_ASL}
+
+				# Gathering the reference volume for this timeseries type
+				motion_target_vol=${motion_target_vol_func_ASL}
+
+			elif [ ${modality_folder_name} = rest ] && [ ${modality_contrast} = ASL ]
+			then
+				# Gathering the number of TRs for the correct timeseries type as entered by user into a variable
+				number_timepoints_user_entered=${number_timepoints_rest_ASL}
+
+				# Gathering the reference volume for this timeseries type
+				motion_target_vol=${motion_target_vol_rest_ASL}
+			fi
+
+			# Comparing the number of time points found above to that entered by the user to check if this FUNCTIONAL run is a complete one (i.e. with all TRs)
+			if [ ${number_timepoints_file_process} = ${number_timepoints_user_entered} ] # Both the TR numbers must match for this functional run to be run by mcflirt
+			then
+				# Checking if MCFLIRT is to be run
+				if [ $motion_mcflirt_run = yes ]
+				then
+					# Going to /tmp directory to prevent mess in the filesystem
+					cd /tmp
+
+					# Motion target volume - check user's option
+					if [ -n "${motion_target_vol}" ] # Checking if this variable is empty. If empty, user opted to use default value, otherwise he/she pick another value
+					then
+						# User chose a particular volue. Assigning it to a variable with the appropriate parameter format for MCFLIRT
+						motion_ref="-refvol ${motion_target_vol}"
+					else
+						# User chose the DEFAULT. Keeping this variable empty so MCFLIRT uses the DEFAULT value
+						motion_ref=""
+					fi
+
+					# First, removing any folder from previous run, then creating the folder to hold the output of MCFLIRT
+					rm -rf ${timeseries_folder}/${QA_main_folder}/${motion_mcflirt_folder} 2> /dev/null
+					mkdir -p ${timeseries_folder}/${QA_main_folder}/${motion_mcflirt_folder} 2> /dev/null
+
+					# Collecting into a variable the FSL tool "mcflirt" command to obtain the motion values for this FUNCTIONAL run. Note that the output will be saved within the subject's functional run folder
+					echo "mcflirt -in ${timeseries_folder}/${timeseries_file} -out ${timeseries_folder}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf -rmsrel -rmsabs ${motion_ref} &> /dev/null" >> ${temp_folder}/${ppss_command_file}
+
+					# Putting the reference volume used for MCFLIRT into a file for later retrieval
+					echo `echo ${motion_ref} | awk '{print $2}'` >  ${timeseries_folder}/${QA_main_folder}/${motion_mcflirt_folder}/mcflirt_ref_volume.txt
+				fi
+			else
+				# In this case this functional run does not match the number of time points informed by the user, thus mcflirt will be not run desnecessarily. It asks the user to check it anyway
+				echo -e "\n"
+				echo -e "##### WARNING #####"
+				echo -e "### This functional run has a different number of time points than informed! ####"
+				echo -e "Number of time points entered by user = ${number_timepoints_user_entered}"
+				echo -e "Number of time points for run \"${timeseries_file}\" = ${number_timepoints_file_process}\n"
+
+				echo -e "File location = ${timeseries_folder}\n"
+
+				echo -e "Please check if this is a complete or incomplete run"
+				echo -e "This run will be skipped from processing here\n"
+
+				echo -en "Press any key to continue "
+				read anykey
+			fi
+
+		elif [ -z "${timeseries_file}" ] # Warning the user in case this variable is empty
+		then
+			echo
+			echo -e "*** WARNING *** There are no TIMESERIES file in this folder: \"${timeseries_folder}\" ***"
+			echo -e "*** Please check it before re-running this script ***\n"
+
+			echo -en "Press any key to continue "
+			read anykey
+		fi
+	done
+done
+
+############ Routine to call PPSS as needed to run MCFLIRT ##############
+
+# Checking if there is a command file for PPSS to run - if not, it means all functional runs already have MCFLIRT ran thus no need to run it again
+if [ -s ${temp_folder}/${ppss_command_file} ] # Checking if this file exists and it's not empty
+then
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -e "*** No MCFLIRT output files were found for some subjects ***"
+	echo -e "They are needed in order to collect info on head motion\n"
+
+	echo -e "##################################################################"
+	echo -e "Collecting motion parameters for timeseries runs using \"mcflirt\""
+	echo -e "##################################################################"
+
+	# Calling the function "parallel_processing_ppss" to run MCFLIRT motion correction. Note the 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted here. Also note that the user choose before the number of processes to be used in PPSS, so here PPSS will be called without user input.
+	parallel_processing_ppss ${temp_folder} ${ppss_command_file} calling_script ${number_processors_to_use}
+
+	# Need to delete the PPS file here otherwise this test will be TRUE even though resting BOLD images being processed on the second loop don't need mcflirt
+	rm ${temp_folder}/${ppss_command_file}
+fi
+}
+
+function timeseries_motion_parameters_outliers_extraction {
+# This function will extract the information on head motion parameters and motion outliers
+
+# It uses 4 parameters:
+	# 1) The filename
+	# 2) The filename without subj ID
+	# 3) The full path to the file
+	# 4) The timeseries modality folder name
+	# 5) The timeseries modality contrast
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+local timeseries_file="$1" # Timeseries filename
+local timeseries_file_noSUBJID="$2" # Timeseries filename without subj ID
+local timeseries_folder_fullpath="$3" # Full path to the timeseries file
+local modality_folder_name="$4"
+local modality_contrast="$5"
+
+# Taking the "_orig.nii.gz" from the file name
+timeseries_file_noextension=`echo ${timeseries_file} | sed 's/_orig.nii.gz//'`
+
+## Checking if this is a complete run, i.e. the number of TRs of it is the same as the one entered by the user previously
+# Number of timepoints for this image
+number_timepoints_file_process=`fslval ${timeseries_folder_fullpath}/${timeseries_file} dim4`
+
+# Checking the type of timeseries and the contrast to gather the correct number of TRs as entered by user in the function "number_volumes_images"
+if [ ${modality_folder_name} = func ] && [ ${modality_contrast} = BOLD ]
+then
+	# Gathering the number of TRs for the correct timeseries type as entered by user into a variable
+	number_timepoints_user_entered=${number_timepoints_func_BOLD}
+
+elif [ ${modality_folder_name} = rest ] && [ ${modality_contrast} = BOLD ]
+then
+	# Gathering the number of TRs for the correct timeseries type as entered by user into a variable
+	number_timepoints_user_entered=${number_timepoints_rest_BOLD}
+fi
+
+if [ ${number_timepoints_file_process} = ${number_timepoints_user_entered} ]
+then
+	###### Step 1 - Collecting information on motion for the functional runs using "mcflirt" tool from FSL ######
+	echo
+	echo -en "\tCollecting motion data from \"${timeseries_file_noSUBJID}\" image using \"mcflirt\" tool output "
+
+	# Going to /tmp directory to prevent mess in the filesystem
+	cd /tmp
+
+	##### MCFLIRT was ran already using PPSS in the above steps, so here its output will be parsed only #####
+
+	# Getting the reference volume # used for mcflirt
+	# First putting it into a variable
+	ref_vol_check=`cat ${timeseries_folder}/${QA_main_folder}/${motion_mcflirt_folder}/mcflirt_ref_volume.txt`
+
+	if [ -n "${ref_vol_check}" ]
+	then
+		# In this case, the user entered a value
+		mcflirt_ref_vol=`echo ${ref_vol_check}`
+
+	elif [ -z "${ref_vol_check}" ]
+	then
+		# In this case, the user chose the DEFAULT value
+		mcflirt_ref_vol="Default value=(no_vols/2) + 1"
+	fi
+
+	# Saving the motion values in numbered list using "-b" parameter for cat command
+	cat -b ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs.rms > ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs_ordered.txt
+
+	cat -b ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel.rms > ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel_ordered.txt
+
+	# Calculating the mean, Std Dev, Min and Max values for motion for this functional run
+	motion_mean_absolute=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs_mean.rms`
+	motion_mean_relative=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel_mean.rms`
+
+	motion_std_dev_absolute=`stat_std_dev $motion_mean_absolute ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs.rms` # Uses the function "stat_std_dev" to calculate the Std Dev
+
+	motion_std_dev_relative=`stat_std_dev $motion_mean_relative ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel.rms` # Uses the function "stat_std_dev" to calculate the Std Dev
+
+	motion_median_absolute=`stat_median ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs.rms` # Uses the function "stat_std_dev" to calculate the Std Dev
+
+	motion_median_relative=`stat_median ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel.rms` # Uses the function "stat_std_dev" to calculate the Std Dev
+
+	motion_min_absolute_raw=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs_ordered.txt | awk '{print $2}' | sort -n | sed -n '2p'` # note that this command ignores the smallest value for motion, as it is always zero for the middle volume that is used as template
+
+	motion_min_absolute_TR=`grep -w ${motion_min_absolute_raw} ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs_ordered.txt | awk '{print $1}'` # This use of grep with option "-w" demands exact match for the string THUS avoids problems with similar numbers. HOWEVER it may still be a problem for EXACT same motion values in 2 or more different TRs - GOTTA KEEP AN EYE ON POTENTIAL ERRORS IF THIS DOES NOT HOLD TRUE
+
+	motion_max_absolute_raw=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs_ordered.txt | awk '{print $2}' | sort -nr | sed -n '1p'` # Here we do not need to avoid the first value as it will always be the max value found
+
+	motion_max_absolute_TR=`grep -w ${motion_max_absolute_raw} ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_abs_ordered.txt | awk '{print $1}'` # This use of grep with option "-w" demands exact match for the string THUS avoids problems with similar numbers. HOWEVER it may still be a problem for EXACT same motion values in 2 or more different TRs - GOTTA KEEP AN EYE ON POTENTIAL ERRORS IF THIS DOES NOT HOLD TRUE
+
+	motion_min_relative_raw=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel_ordered.txt | awk '{print $2}' | sort -n | sed -n '2p'` # note that this command ignores the smallest value for motion, as it is always zero for the middle volume that is used as template
+
+	motion_min_relative_TR=`grep -w ${motion_min_relative_raw} ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel_ordered.txt | awk '{print $1}'` # This use of grep with option "-w" demands exact match for the string THUS avoids problems with similar numbers. HOWEVER it may still be a problem for EXACT same motion values in 2 or more different TRs - GOTTA KEEP AN EYE ON POTENTIAL ERRORS IF THIS DOES NOT HOLD TRUE
+
+	motion_max_relative_raw=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel_ordered.txt | awk '{print $2}' | sort -nr | sed -n '1p'` # Here we do not need to avoid the first value as it will always be the max value found
+
+	motion_max_relative_TR=`grep -w ${motion_max_relative_raw} ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_mcflirt_folder}/${timeseries_file_noextension}_mcf_rel_ordered.txt | awk '{print $1}'` # This use of grep with option "-w" demands exact match for the string THUS avoids problems with similar numbers. HOWEVER it may still be a problem for EXACT same motion values in 2 or more different TRs - GOTTA KEEP AN EYE ON POTENTIAL ERRORS IF THIS DOES NOT HOLD TRUE
+
+###### Step 2 - Collecting info on MOTION OUTLIERS for functional runs using available metrics ######
+#### MOTION OUTLIERS DETECTION MUST HAVE ALREADY BEEN DONE ####
+	echo
+	echo -en "\tCollecting motion outliers data from \"${timeseries_file_noSUBJID}\" image "
+
+	# Collecting information on the metrics used to detect outliers using fsl_motion_outliers
+	# Getting all metric processing files into a variable
+	metrics_process_file_list=`ls ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_*_processinfo.txt 2> /dev/null | sed 's!'${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/'!!'`
+
+	# Checking if the motion assessment with fsl_motion_outliers was done
+	if [ -n "${metrics_process_file_list}" ]
+	then
+		# Looping through each metric file
+		for metric_file in ${metrics_process_file_list}
+		do
+			# Extracting the metric from the filename. Notice the use of awk's built-in variable "NF", which lists the total number of data fields in the data file. So here I am using the one before the last data field by subtracting one unit from the "NF" value
+			metric=`echo ${metric_file} | awk 'BEGIN {FS="_"} { print ( $(NF-1) ) }'`
+
+			# Creating the variables holding the info on outliers
+			# Variable holding the number of deleted volumes (that will be discarded during FEAT analysis due to lack of stabilization of longitudinal magnetization) for motion outliers detection. HAs to use semicolon as separator for "awk" command since this info is in the header of the file and there is no new line separation from other items.
+			metric_deleted_vols=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_${metric}_processinfo.txt | grep "ndel = " | awk 'BEGIN {FS=";"} {print $3}' | sed 's/ndel = //'`
+
+			# Variables holding the minimum and max metric values
+			metric_values_min=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_${metric}_processinfo.txt | grep "Range of metric values:" | awk '{print $5}'`
+
+			metric_values_max=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_${metric}_processinfo.txt | grep "Range of metric values:" | awk '{print $6}'`
+
+			# Variable holding outlier detection threshold
+			outliers_threshold=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_${metric}_processinfo.txt | grep "outliers over" | awk '{print $5}'`
+
+			# Variable holding how many outliers
+			outliers_quantity=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_${metric}_processinfo.txt | grep "outliers over" | awk '{print $2}'`
+
+			# Variable holding the the affected TRs
+			outliers_TR_temp=`cat ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_${metric}_processinfo.txt | grep "Found spikes at" | sed 's/Found spikes at//'`
+
+			# Taking out the spaces from the variable "outliers_TR_temp" contents
+			outliers_TR_temp_nospaces=`echo ${outliers_TR_temp} | sed 's/ //g'`
+
+			# Checking if the variables below are not empty
+			if [ X${outliers_TR_temp_nospaces} = X ]
+			then
+				outliers_TR=none
+			else
+				outliers_TR="${outliers_TR_temp}"
+			fi
+
+			# Creating a temporary file to hold this metric informations for each functional run for the subject being processed
+			echo "${metric_deleted_vols}:${metric_values_min}:${metric_values_max}:${outliers_threshold}:${outliers_quantity}:${outliers_TR}:" > ${temp_folder}/${SUBJ}/metric_info_${FRUN}_${metric}_${SUBJ}.txt
+		done
+
+		# Collecting the TRs that were outliers for both "fd" and "dvars" metrics from fsl_motion_outliers. It will collect this data from the temporary file created above, from the 6th data field ("outliers_TR")
+		outliers_fd=`cat ${temp_folder}/${SUBJ}/metric_info_${FRUN}_fd_${SUBJ}.txt  | awk 'BEGIN {FS=":"} {print $6}'`
+		outliers_dvars=`cat ${temp_folder}/${SUBJ}/metric_info_${FRUN}_dvars_${SUBJ}.txt  | awk 'BEGIN {FS=":"} {print $6}'`
+
+		# Looping throught the outlier TRs for "fd" and "dvars" to compare them and extract the TR common to both
+		for item in ${outliers_fd}
+		do
+			for item2 in ${outliers_dvars}
+			do
+				if [ $item = $item2 ] && [ $item != none ] && [ $item2 != none ]
+				then
+					# Temporary variable with the common TRs. It will be empty if there are no common outlier TRs
+					outliers_fd_dvars_common_temp="${outliers_fd_dvars_common_temp} ${item2}"
+
+					# Removing the tested outlier TR so it does not unnecessarily compare it again
+					outliers_fd=${outliers_fd/$item/}
+					outliers_dvars=${outliers_dvars/$item2/}
+				fi
+			done
+		done
+
+		# Taking out the spaces from the variable "outliers_fd_dvars_common_temp" contents
+		outliers_fd_dvars_common_temp_nospaces=`echo ${outliers_fd_dvars_common_temp} | sed 's/ //g'`
+
+		# Checking if there are common outlier TRs, and if not putting "none" as the content for variable "outliers_fd_dvars_common"
+		if [ X${outliers_fd_dvars_common_temp_nospaces} != X ] # In this case the variable "outliers_fd_dvars_common_temp" has contents
+		then
+			# Transfering the outlier TRs from the temporary variable into the final one
+			outliers_fd_dvars_common="${outliers_fd_dvars_common_temp}"
+		else
+			# In this case the variable "outliers_fd_dvars_common_temp" is empty
+			outliers_fd_dvars_common=none
+		fi
+
+		# Counting the number of common outlier TRs found
+		# First, checking if this variable has content (i.e. has common outliers)
+		if [ "${outliers_fd_dvars_common}" != none ] # Uses the output from the test above to check if this variable has content (= if its content is different than none)
+		then
+			outliers_common_count=0 # Variable to hold the count
+
+			# Loop through each item within the variable "outliers_fd_dvars_common"
+			for item in ${outliers_fd_dvars_common}
+			do
+				outliers_common_count=$[ $outliers_common_count + 1 ]
+			done
+
+		elif [ "${outliers_fd_dvars_common}" = none ] # Since its content is equal to "none", there are zero common outliers
+		then
+			outliers_common_count=0 # Variable to hold the count
+		fi
+
+		# Looping through each metric file
+		for metric_file in `ls ${temp_folder}/${SUBJ}/metric_info_${FRUN}_*_${SUBJ}.txt`
+		do
+			# Now collecting all the metrics information from the files created above into the final variable to be outputed
+			metrics_info_temp="${metrics_info_temp}`cat ${metric_file}`"
+		done
+
+		# Putting together the metrics information and the common outliers info
+		metrics_info="${metrics_info_temp}${outliers_fd_dvars_common}:${outliers_common_count}"
+	else
+		echo
+		echo -e "*** Could not find the output files for head motion ***"
+		echo -e "Please run the outliers detection in the PROCESSING menu then re-run this script\n"
+
+		echo -en "Press any key to skip this subject "
+		read -n1 anykey
+	fi
+else
+	# Defining a variable to signal an invalid run
+	invalid_run_wrongTRnumber="INVALID RUN - # of TRs not match"
+
+	# Variable to asign an empty value
+	invalid_run_empty="-"
+
+	# Holding all output variables of this function as an array
+	output_variables1=( motion_mean_absolute motion_std_dev_absolute motion_median_absolute motion_min_absolute_raw motion_min_absolute_TR motion_max_absolute_raw motion_max_absolute_TR motion_mean_relative motion_std_dev_relative motion_median_relative motion_min_relative_raw motion_min_relative_TR motion_max_relative_raw motion_max_relative_TR metrics_info min_absolute_intensity max_absolute_intensity mean_4D_absolute Std_Dev_absolute min_robust_intensity max_robust_intensity mean_4D_nonzero Std_Dev_nonzero voxels_per_volume_absolute voxels_per_volume_nonzero area_per_volume_absolute area_per_volume_nonzero )
+
+	# Establishing a counter for the array index
+	index=0
+
+	for item in "${output_variables1[@]}"
+	do
+		# Assigning the "empty" value for each element of the array.
+		## Need to use a variable's value as another variable name ##
+		# First, assigning an array value to a temporary variable
+		var_temp=${output_variables1[index]}
+		# Second, Assigning the content to the temporary variable. Note the escape of the dollar sign AND no use of brackets (if use brackets around the variable to the right of dollar sign it will trigger an error
+		eval $var_temp=\$invalid_run_wrongTRnumber
+
+		# Adding a unit to the index counter
+		((index++))
+	done
+
+	# Holding the motion outliers metrics as an array
+	output_variables2=( mcflirt_ref_vol metric_deleted_vols metric_values_min metric_values_max outliers_threshold outliers_quantity outliers_TR )
+
+	# Cleaning up the contents of the variables below, in case of previous loops.
+	unset metrics_empty_temp1 metrics_empty_temp2
+
+	for item in "${output_variables2[@]}"
+	do
+		# Assigning the empty value for each element of the array, then into a temporary variable
+		metrics_empty_temp1="${metrics_empty_temp1}${invalid_run_empty}:"
+	done
+
+	# Looping through each metric file
+	for metric_file in `ls ${timeseries_folder_fullpath}/${QA_main_folder}/${motion_outliers_folder}/*_OUTLIERS_SINGLEMETRIC_*_processinfo.txt`
+	do
+		# NEED TO MAKE THE VARIABLES ON ARRAY TO LOOP AS MANY TIMES AS THERE ARE MOTION METRICS
+		# THEN NEED TO ADD 2 MORE CONTENTS TO THE RESULTS
+		metrics_empty_temp2="${metrics_empty_temp2}${metrics_empty_temp1}"
+	done
+
+	# Putting together the metrics information and the common outliers info
+	metrics_info="${metrics_empty_temp2}${invalid_run_empty}:${invalid_run_empty}"
+fi
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Variable with all modalities that can be processed within this script
+modalities_available="anatomical DWI func_BOLD rest_BOLD func_ASL rest_ASL"
+
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_QAmotion # Where the temporary files will be held
+
+# Variable with the name for the ppss command file
+ppss_command_file=subject_motion_parameters # Basename for the temporary files
+
+QA_main_folder=QA_motion # Folder within each subjects timeseries folders that holds QA data
+motion_mcflirt_folder=mcflirt_output # Subfolder of QA_motion, folder within mcflirt files are save
+motion_outliers_folder=fsl_motion_outliers_output # Subfolder of QA_motion, folder within fsl_motion_outliers files are save
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+
+# Clearing the terminal and going to the /tmp folder just in case of any error no mess is done in the filesystem
+clear
+
+cd /tmp
+
+# Removing previously created temporary folder and its contents, if present
+rm -rf ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold all temporary files
+mkdir ${temp_folder} 2> /dev/null
+
+echo -e "This script will collect information the header info for the image files and their descriptive statistics"
+echo -e "This can help you in the QA process, cheking if all volumes are as expected regarding number of TRs, mean intensity, etc"
+
+# FUNCTIONAL CALL: allowing the user to choose the modalities to be processed by calling the function "modalities_processing" in "mainscrcall_funclib", and storing those modalities in the variable "MODALITIES_PROCESSING_LIST"
+modalities_processing
+
+# Main menu logic
+while [ 1 ]
+do
+	# Allowing the user to choose to collect both header information and descriptive statistics for image files or either one
+	echo
+	echo -e "Do you want to gather information on:"
+	echo -e "\t1. Both header information and descriptive statistics for image files"
+	echo -e "\t\t1.1. Header information only"
+	echo -e "\t\t1.2. Descriptive statistics only"
+	echo -e "\t0. Back to main menu\n"
+
+	echo -en "\t\tEnter your option here and press enter: "
+	read option
+
+	# Ask for user input to continue
+	case ${option} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+
+		sleep 2
+
+		break ;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "header_info_QA:Information gathering from header of image files and descriptive statistics" FSL "(header_info) fsl_hd; (descript_stats_outputfile) mcflirt, fslval, fslstats"
+
+		# Removing the temporary folder and its contents (in case there are some remaning from previous script use)
+		rm -rf ${temp_folder} 2> /dev/null
+
+		# Creating the temporary folder
+		mkdir ${temp_folder}
+
+		# Giving information to the user on what this script will do
+		echo -e "\n"
+		echo -e "###################################################################################"
+		echo -e "This script will collect header info from the image files for the subjects listed: \n${SUBJLIST}\n"
+
+		echo -e "It will also collect the respective descriptive statistics"
+		echo -e "The header info will be collected using the \"fslhd\" command from the FSL package. The collected information will be saved in a file named \"SUBJID_header_info_detailed.txt\""
+		echo -e "A second file will be created containing both the header info, the descriptive statistics plus motion information for functional images, and this colon-separated text file can be imported into a spreadsheet\n"
+
+		echo -e "Both files will be located within each subject's main folder"
+		echo -e "###################################################################################"
+
+		############# TIMESERIES VOLUMES NUMBER and MOTION OUTLIERS CHECK ############################
+		# Checking if there are other images modalities besides ANATOMICAL, and if so asking the user to enter the number of volumes in them
+		# Removing the spaces of content of variable "MODALITIES_PROCESSING_LIST"
+		MODALITIES_PROCESSING_LIST_nospaces=`echo ${MODALITIES_PROCESSING_LIST} | sed 's/ //g'`
+		if [ ${MODALITIES_PROCESSING_LIST_nospaces} != anatomical ]
+		then
+			# FUNCTION CALL: Getting the info on number of time points for time-series runs (stimulus-evoked, resting-state BOLD, ASL, DWI) by calling the function "number_volumes_images"
+			number_volumes_images
+
+			# FUNCTION CALL: Checking if the output files from the script "motion_outliers" are present within the timeseries folders for each subject, by calling the function "timeseries_motion_outliers_processed".
+			timeseries_motion_outliers_processed
+		fi
+		##############################################################################################
+
+		###############################################
+		####### Collecting HEADER INFO ################
+		echo -e "\n"
+		echo -e "Collecting header info for IMAGE files"
+
+		# Tagging the start processing time
+		start_processing=`current_date_time 2`
+
+		# FUNCTION CALL: Calling function "header_info_raw" to collect info on the image files using FSL tool (fslhd). It has a for loop to go through all subjects within it.
+		header_info_raw
+
+		echo
+		echo -e "Done Collecting header info for IMAGE files for all subjects"
+		###############################################
+
+		#############################################################################################
+		####### Collecting descriptive statistics + head motion (if applicable) INFO ################
+		echo
+		echo -e "Collecting descriptive statistics + head motion (if applicable) now"
+
+		# Loop to process all subjects
+		for SUBJ in ${SUBJLIST}
+		do
+			# Creating the folder for the subject being processed
+			mkdir -p ${temp_folder}/${SUBJ} 2> /dev/null
+
+			# FUNCTION CALL: Calling function "output_file" to initiate the output text file with its headers
+			output_file
+		done
+
+		# Looping through the modalities chosen by user for processing
+		for item in ${MODALITIES_PROCESSING_LIST}
+		do
+			if [ ${item} = anatomical ] || [ ${item} = DWI ]
+			then
+				# PROCESSING ANATOMICAL OR FUNCTIONAL and RESTING ASL OR DIFFUSION-WEIGHTED
+				# Checking the image modality being processed
+				if [ ${item} = anatomical ]
+				then
+				# Variables for path to the files being processed
+				image_type_contrast=ANATOMICAL
+				modality_folder_name=anat
+				modality_file_name=anat
+
+				elif [ ${item} = DWI ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=DIFFUSION-WEIGHTED
+					modality_folder_name=DWI
+					modality_subfolder_name=DWI
+					modality_contrast=DWI
+				fi
+
+			# Giving feedback to the user
+			echo -e "\n"
+			echo -e "###################################"
+			echo -e "### Processing ${image_type_contrast} files ###"
+			echo -e "###################################"
+
+			# Loop to process all subjects
+			for SUBJ in ${SUBJLIST}
+			do
+				# Giving feedback to the user
+				echo -e "\n"
+				echo -e "#########################################"
+				echo -e "Subject being processed: ### ${SUBJ} ####"
+				echo -e "#########################################"
+
+				# Checking what image modality is being processed, in order to collect the file list accordingly
+				if [ ${image_type_contrast} = ANATOMICAL ]
+				then
+					# Collecting relevant ANATOMICAL files available for this subject.
+					file_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${SUBJ}_${modality_file_name}_*_orig.nii.gz 2> /dev/null`
+				else
+					# Collecting relevant files available for this subject for either FUNCTIONAL and RESTING ASL OR DIFFUSION-WEIGHTED.
+					file_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}*/*${modality_contrast}*_orig.nii.gz 2> /dev/null`
+				fi
+
+				# Checking if the variable "file_list" has content
+				if [ -n "${file_list}" ]
+				then
+					for item in ${file_list}
+					do
+						# Getting the full path for the file into a variable
+						image_file_fullpath="${item}"
+
+						# Getting the name of the file without the subject ID into a variable
+						image_name=`echo ${item} | awk -F/ '{print $NF}'`
+
+						# Checking if this is an ANATOMICAL image, as the contrast type is described in its filename
+						if [ ${image_type_contrast} = ANATOMICAL ]
+						then
+							# Getting the ANATOMICAL contrast into a variable. Needs to remove the "subjID_anat" before and the "_orig.nii.gz" after the contrast in the file name
+							modality_contrast=`echo ${image_name} | sed 's!'${SUBJ}_anat_'!!' | sed 's!'_orig.nii.gz'!!'`
+						fi
+
+						# Getting the name of the file without the subject ID into a variable
+						image_name_noSUBJID=`echo ${item} | awk -F/ '{print $NF}' | sed 's!'${SUBJ}_'!!'`
+
+						# FUNCTION CALL: Calling function "header_info_processed" to collect the info into variables. It needs 3 parameters: 1. the type of image being processed, 2. The filename without the subject ID, amd 3. The full path to the file
+						header_info_processed ${image_type_contrast} ${image_name_noSUBJID} ${image_file_fullpath}
+
+						# Reporting the variables contents to the output file. Note the addition of "counter" to the "image_type" variable to account for more than one anatomical
+						echo -e "${SUBJ}:${image_name}:${image_file_fullpath}:${image_type_contrast}:${modality_contrast}:${voxel_unit}:${time_unit}:${number_time_points}:${TR_value}:${TE_value}:${FA_value}:${voxel_dim_X}:${voxel_dim_Y}:${voxel_dim_Z}:${image_dim_X}:${image_dim_Y}:${image_dim_Z}:${HEADER_EMPTY_SPACES}${min_absolute_intensity}:${max_absolute_intensity}:${mean_4D_absolute}:${Std_Dev_absolute}:${min_robust_intensity}:${max_robust_intensity}:${mean_4D_nonzero}:${Std_Dev_nonzero}:${voxels_per_volume_absolute}:${voxels_per_volume_nonzero}:${area_per_volume_absolute}:${area_per_volume_nonzero}:"  >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+					done
+
+				elif [ -z "${file_list}" ] # Warning the user in case this variable is empty
+				then
+					echo
+					echo -e "*** WARNING *** There are no \"${image_type}\" files listed for subject \"${SUBJ}\" ***" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+					echo -e "*** Please check it before re-running this script ***\n" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+				fi
+			done
+
+			elif [ $item = func_BOLD ] || [ $item = rest_BOLD ] || [ $item = func_ASL ] || [ $item = rest_ASL ]
+			then
+				# PROCESSING FUNCTIONAL and RESTING BOLD / ASL
+
+				# Checking the image modality being processed (FUNCTIONAL or RESTING BOLD/ASL).
+				if [ $item = func_BOLD ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=FUNCTIONAL_BOLD
+					modality_folder_name=func
+					modality_subfolder_name=frun
+					modality_contrast=BOLD
+
+				elif [ $item = rest_BOLD ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=RESTING_BOLD
+					modality_folder_name=rest
+					modality_subfolder_name=resting
+					modality_contrast=BOLD
+
+				elif [ $item = func_ASL ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=FUNCTIONAL_ASL
+					modality_folder_name=func
+					modality_subfolder_name=frun
+					modality_contrast=ASL
+
+				elif [ $item = rest_ASL ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=RESTING_ASL
+					modality_folder_name=rest
+					modality_subfolder_name=resting
+					modality_contrast=ASL
+				fi
+
+				# Giving feedback to the user
+				echo -e "\n"
+				echo -e "########################################"
+				echo -e "### Processing ${image_type_contrast} files ###"
+				echo -e "########################################"
+
+				# FUNCTION CALL: Calling function "motion_assessment_mcflirt" to determine if head motion parameters need to be collected. It has to be run outside the below loop in order for them to be run altogether. If it was included in the similar loop below, it would run one timeseries file at a time (non-optimal use of PPSS)
+				timeseries_motion_mcflirt ${modality_folder_name} ${modality_subfolder_name} ${modality_contrast}
+
+				# Loop to process all subjects
+				for SUBJ in ${SUBJLIST}
+				do
+					# Giving feedback to the user
+					echo -e "\n"
+					echo -e "#########################################"
+					echo -e "Subject being processed: ### ${SUBJ} ####"
+					echo -e "#########################################"
+
+					# Collecting relevant files available for this subject.
+					file_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}*/*${modality_contrast}*_orig.nii.gz 2> /dev/null`
+
+					# Checking if the variable "file_list" has content
+					if [ -n "${file_list}" ]
+					then
+						# Loop to gather the stats for all timeseries files and outputing it to a text file
+						for item in ${file_list}
+						do
+							# Getting the full path for the file into a variable
+							image_file_fullpath="${item}"
+
+							# Getting the name of the file without the subject ID into a variable
+							image_name=`echo ${item} | awk -F/ '{print $NF}'`
+
+							# Getting the name of the file without the subject ID into a variable
+							image_name_noSUBJID=`echo ${item} | awk -F/ '{print $NF}' | sed 's!'${SUBJ}_'!!'`
+
+							# Getting the full path for folder holding image file into a variable
+							image_folder_fullpath=`echo ${item} | sed 's/'${image_name}'//'`
+
+							# FUNCTION CALL: Calling function "header_info_processed" to collect the info into variables. It needs 3 parameters: 1. the type of image being processed, 2. The filename without the subject ID, and 3. The full path to the file
+							header_info_processed ${image_type_contrast} ${image_name_noSUBJID} ${image_file_fullpath}
+
+							# FUNCTION CALL: Calling function "timeseries_motion_parameters_outliers_extraction" to extract info from motion parameters and motion outliers. It needs 5 parameters: 1. The filename, 2. The filename without subj ID, 3. The full path to the file, 4. The timeseries modality folder name, and 5. The timeseries modality contrast
+							timeseries_motion_parameters_outliers_extraction ${image_name} ${image_name_noSUBJID} ${image_folder_fullpath} ${modality_folder_name} ${modality_contrast}
+
+							# Reporting the variables contents to the output file. Note that the variable "metrics_info" holds the contents of the text file with all the information gathered using the "fsl_motion_outliers" tool
+							echo -e "${SUBJ}:${image_name}:${image_file_fullpath}:${image_type_contrast}:${modality_contrast}:${voxel_unit}:${time_unit}:${number_time_points}:${TR_value}:${TE_value}:${FA_value}:${voxel_dim_X}:${voxel_dim_Y}:${voxel_dim_Z}:${image_dim_X}:${image_dim_Y}:${image_dim_Z}:${mcflirt_ref_vol}:${motion_mean_absolute}:${motion_std_dev_absolute}:${motion_median_absolute}:${motion_min_absolute_raw}:${motion_min_absolute_TR}:${motion_max_absolute_raw}:${motion_max_absolute_TR}:${motion_mean_relative}:${motion_std_dev_relative}:${motion_median_relative}:${motion_min_relative_raw}:${motion_min_relative_TR}:${motion_max_relative_raw}:${motion_max_relative_TR}:${metrics_info}:${min_absolute_intensity}:${max_absolute_intensity}:${mean_4D_absolute}:${Std_Dev_absolute}:${min_robust_intensity}:${max_robust_intensity}:${mean_4D_nonzero}:${Std_Dev_nonzero}:${voxels_per_volume_absolute}:${voxels_per_volume_nonzero}:${area_per_volume_absolute}:${area_per_volume_nonzero}:"  >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+
+							# Cleaning the contents of the variables below used within the function "descript_stats_variables"
+							unset metrics_info
+							unset metrics_info_temp
+							unset outliers_fd_dvars_common
+							unset outliers_fd_dvars_common_temp
+							unset outliers_TR_temp_nospaces
+							unset outliers_fd_dvars_common_temp_nospaces
+						done
+
+					elif [ -z "${file_list}" ] # Warning the user in case this variable is empty
+					then
+						echo
+						echo -e "*** WARNING *** There are no \"${image_type_contrast}\" files listed for subject \"${SUBJ}\" ***" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+						echo -e "*** Please check it before re-running this script ***\n" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+					fi
+				done
+			fi
+		done
+
+		# Tagging the end processing time
+		finish_processing=`current_date_time 2`
+
+		echo -e "Done collecting header info and descriptive statistics for IMAGE files\n"
+
+		echo -e "All information was collected for all subjects sucessfuly\n"
+
+		echo -e "To load the output files into a spreadsheet like Excel, use the option \"Import text files\""
+		echo -e "For the text files containing \"header info\", use \"separated by tab\""
+		echo -e "For text files contaning \"descriptive statistics\", use \"separated by colon\"\n"
+
+		# Giving feedback to the user of the processing time
+		echo -e "Start time was: ${start_processing}"
+		echo -e "Finish time was: ${finish_processing}\n"
+
+		# Giving the option to the user to look at the temporary files created before erasing them
+		cd /tmp
+
+		echo -e "\n"
+		echo -e "\tIf you want to look at the temporary files created in this folder: ${temp_folder}"
+		echo -e "\tAnd the log files for the PPSS command, please do so before continuing to the main menu\n"
+
+		echo -e "\tOtherwise, all log files will be erased as soon as you press any key to continue\n"
+
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	1.1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "header_info_QA:Information gathering from header of image files and descriptive statistics" FSL "(header_info) fsl_hd"
+
+		# Removing the temporary folder and its contents (in case there are some remaning from previous script use)
+		rm -rf ${temp_folder} 2> /dev/null
+
+		# Creating the temporary folder
+		mkdir ${temp_folder}
+
+		# Giving information to the user on what this script will do
+		echo -e "\n"
+		echo -e "###################################################################################"
+		echo -e "This script will collect header info from the image files for the subjects listed: \n${SUBJLIST}\n"
+
+		echo -e "It will also collect the respective descriptive statistics"
+		echo -e "The header info will be collected using the \"fslhd\" command from the FSL package. The collected information will be saved in a file named \"SUBJID_header_info_detailed.txt\""
+
+		echo -e "The file will be located within each subject's main folder"
+		echo -e "###################################################################################"
+
+		echo -e "\n\n"
+		echo -e "Collecting header info for IMAGE files\n"
+
+		# Tagging the start processing time
+		start_processing=`current_date_time 2`
+
+		# FUNCTION CALL: Calling function "header_info_raw" to collect info on the image files using FSL tool (fslhd). It has a for loop to go through all subjects within it.
+		header_info_raw
+
+		# Tagging the end processing time
+		finish_processing=`current_date_time 2`
+
+		echo
+		echo -e "Done Collecting header info for IMAGE files for all subjects\n"
+
+		echo -e "To load the output files into a spreadsheet like Excel, use the option \"Import text files\""
+		echo -e "For the text files containing \"header info\", use \"separated by tab\""
+
+		# Giving feedback to the user of the processing time
+		echo -e "Start time was: ${start_processing}"
+		echo -e "Finish time was: ${finish_processing}\n"
+
+		# Giving the option to the user to look at the temporary files created before erasing them
+		cd /tmp
+
+		echo -e "\n"
+		echo -e "\tIf you want to look at the temporary files created in this folder: ${temp_folder}"
+		echo -e "\tPlease do so before continuing \n"
+
+		echo -e "\tOtherwise, all files will be erased as soon as you press any key to continue\n"
+
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	1.2)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "header_info_QA:Information gathering from header of image files and descriptive statistics" FSL "(descript_stats_outputfile) mcflirt, fslval, fslstats"
+
+		# Giving information to the user on what this script will do
+		echo -e "\n"
+		echo -e "This script will collect descriptive statistics from the image files for the subjects listed: \n${SUBJLIST}\n"
+
+		echo -e "The file will be created containing both the header info, the descriptive statistics plus motion information for functional images, and this colon-separated text file can be imported into a spreadsheet\n"
+
+		echo -e "The file will be located within each subject's main folder"
+
+		# Removing the temporary folder and its contents (in case there are some remaning from previous script use)
+		rm -rf ${temp_folder} 2> /dev/null
+
+		# Creating the temporary folder
+		mkdir ${temp_folder}
+
+		# Giving information to the user on what this script will do
+		echo -e "\n"
+		echo -e "###################################################################################"
+		echo -e "This script will collect descriptive statistics from the image files for the subjects listed: \n${SUBJLIST}\n"
+
+		echo -e "The file will be created containing both the header info, the descriptive statistics plus motion information for functional images, and this colon-separated text file can be imported into a spreadsheet\n"
+
+		echo -e "Both files will be located within each subject's main folder"
+		echo -e "###################################################################################"
+
+		############# TIMESERIES VOLUMES NUMBER and MOTION OUTLIERS CHECK ############################
+		# Checking if there are other images modalities besides ANATOMICAL, and if so asking the user to enter the number of volumes in them
+		# Removing the spaces of content of variable "MODALITIES_PROCESSING_LIST"
+		MODALITIES_PROCESSING_LIST_nospaces=`echo ${MODALITIES_PROCESSING_LIST} | sed 's/ //g'`
+		if [ ${MODALITIES_PROCESSING_LIST_nospaces} != anatomical ]
+		then
+			# FUNCTION CALL: Getting the info on number of time points for time-series runs (stimulus-evoked, resting-state BOLD, ASL, DWI) by calling the function "number_volumes_images"
+			number_volumes_images
+
+			# FUNCTION CALL: Checking if the output files from the script "motion_outliers" are present within the timeseries folders for each subject, by calling the function "timeseries_motion_outliers_processed".
+			timeseries_motion_outliers_processed
+		fi
+		##############################################################################################
+
+		#############################################################################################
+		####### Collecting descriptive statistics + head motion (if applicable) INFO ################
+		echo -e "\n"
+		echo -e "Collecting descriptive statistics + head motion (if applicable) now"
+
+		# Tagging the start processing time
+		start_processing=`current_date_time 2`
+
+		# Loop to process all subjects
+		for SUBJ in ${SUBJLIST}
+		do
+			# Creating the folder for the subject being processed
+			mkdir -p ${temp_folder}/${SUBJ} 2> /dev/null
+
+			# FUNCTION CALL: Calling function "output_file" to initiate the output text file with its headers
+			output_file
+		done
+
+		# Looping through the modalities chosen by user for processing
+		for item in ${MODALITIES_PROCESSING_LIST}
+		do
+			if [ $item = anatomical ] || [ $item = DWI ]
+			then
+				# PROCESSING ANATOMICAL OR FUNCTIONAL and RESTING ASL OR DIFFUSION-WEIGHTED
+				# Checking the image modality being processed
+				if [ $item = anatomical ]
+				then
+				# Variables for path to the files being processed
+				image_type_contrast=ANATOMICAL
+				modality_folder_name=anat
+				modality_file_name=anat
+
+				elif [ $item = DWI ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=DIFFUSION-WEIGHTED
+					modality_folder_name=DWI
+					modality_subfolder_name=DWI
+					modality_contrast=DWI
+				fi
+
+			# Giving feedback to the user
+			echo -e "\n"
+			echo -e "###################################"
+			echo -e "### Processing ${image_type_contrast} files ###"
+			echo -e "###################################"
+
+			# Loop to process all subjects
+			for SUBJ in ${SUBJLIST}
+			do
+				# Giving feedback to the user
+				echo -e "\n"
+				echo -e "#########################################"
+				echo -e "Subject being processed: ### ${SUBJ} ####"
+				echo -e "#########################################"
+
+				# Checking what image modality is being processed, in order to collect the file list accordingly
+				if [ ${image_type_contrast} = ANATOMICAL ]
+				then
+					# Collecting relevant ANATOMICAL files available for this subject.
+					file_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${SUBJ}_${modality_file_name}_*_orig.nii.gz 2> /dev/null`
+				else
+					# Collecting relevant files available for this subject for either FUNCTIONAL and RESTING ASL OR DIFFUSION-WEIGHTED.
+					file_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}*/*${modality_contrast}*_orig.nii.gz 2> /dev/null`
+				fi
+
+				# Checking if the variable "file_list" has content
+				if [ -n "${file_list}" ]
+				then
+					for item in ${file_list}
+					do
+						# Getting the full path for the file into a variable
+						image_file_fullpath="${item}"
+
+						# Getting the name of the file without the subject ID into a variable
+						image_name=`echo ${item} | awk -F/ '{print $NF}'`
+
+						# Checking if this is an ANATOMICAL image, as the contrast type is described in its filename
+						if [ ${image_type_contrast} = ANATOMICAL ]
+						then
+							modality_contrast=`echo ${image_name} | awk -F_ '{print ( $(NF - 1) ) }'`
+						fi
+
+						# Getting the name of the file without the subject ID into a variable
+						image_name_noSUBJID=`echo ${item} | awk -F/ '{print $NF}' | sed 's!'${SUBJ}_'!!'`
+
+						# FUNCTION CALL: Calling function "header_info_processed" to collect the info into variables. It needs 3 parameters: 1. the type of image being processed, 2. The filename without the subject ID, amd 3. The full path to the file
+						header_info_processed ${image_type_contrast} ${image_name_noSUBJID} ${image_file_fullpath}
+
+						# Reporting the variables contents to the output file. Note the addition of "counter" to the "image_type" variable to account for more than one anatomical
+						echo -e "${SUBJ}:${image_name}:${image_file_fullpath}:${image_type_contrast}:${modality_contrast}:${voxel_unit}:${time_unit}:${number_time_points}:${TR_value}:${TE_value}:${FA_value}:${voxel_dim_X}:${voxel_dim_Y}:${voxel_dim_Z}:${image_dim_X}:${image_dim_Y}:${image_dim_Z}:${HEADER_EMPTY_SPACES}${min_absolute_intensity}:${max_absolute_intensity}:${mean_4D_absolute}:${Std_Dev_absolute}:${min_robust_intensity}:${max_robust_intensity}:${mean_4D_nonzero}:${Std_Dev_nonzero}:${voxels_per_volume_absolute}:${voxels_per_volume_nonzero}:${area_per_volume_absolute}:${area_per_volume_nonzero}:"  >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+					done
+
+				elif [ -z "${file_list}" ] # Warning the user in case this variable is empty
+				then
+					echo
+					echo -e "*** WARNING *** There are no \"${image_type}\" files listed for subject \"${SUBJ}\" ***" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+					echo -e "*** Please check it before re-running this script ***\n" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+				fi
+			done
+
+			elif [ $item = func_BOLD ] || [ $item = rest_BOLD ] || [ $item = func_ASL ] || [ $item = rest_ASL ]
+			then
+				# PROCESSING FUNCTIONAL and RESTING BOLD / ASL
+
+				# Checking the image modality being processed (FUNCTIONAL or RESTING BOLD/ASL).
+				if [ $item = func_BOLD ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=FUNCTIONAL_BOLD
+					modality_folder_name=func
+					modality_subfolder_name=frun
+					modality_contrast=BOLD
+
+				elif [ $item = rest_BOLD ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=RESTING_BOLD
+					modality_folder_name=rest
+					modality_subfolder_name=resting
+					modality_contrast=BOLD
+
+				elif [ $item = func_ASL ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=FUNCTIONAL_ASL
+					modality_folder_name=func
+					modality_subfolder_name=frun
+					modality_contrast=ASL
+
+				elif [ $item = rest_ASL ]
+				then
+					# Variables for path to the files being processed
+					image_type_contrast=RESTING_ASL
+					modality_folder_name=rest
+					modality_subfolder_name=resting
+					modality_contrast=ASL
+				fi
+
+				# Giving feedback to the user
+				echo -e "\n"
+				echo -e "########################################"
+				echo -e "### Processing ${image_type_contrast} files ###"
+				echo -e "########################################"
+
+				# FUNCTION CALL: Calling function "motion_assessment_mcflirt" to determine if head motion parameters need to be collected. It has to be run outside the below loop in order for them to be run altogether. If it was included in the similar loop below, it would run one timeseries file at a time (non-optimal use of PPSS)
+				timeseries_motion_mcflirt ${modality_folder_name} ${modality_subfolder_name} ${modality_contrast}
+
+				# Loop to process all subjects
+				for SUBJ in ${SUBJLIST}
+				do
+					# Giving feedback to the user
+					echo -e "\n"
+					echo -e "#########################################"
+					echo -e "Subject being processed: ### ${SUBJ} ####"
+					echo -e "#########################################"
+
+					# Collecting relevant files available for this subject.
+					file_list=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}*/*${modality_contrast}*_orig.nii.gz 2> /dev/null`
+
+					# Checking if the variable "file_list" has content
+					if [ -n "${file_list}" ]
+					then
+						# Loop to gather the stats for all timeseries files and outputing it to a text file
+						for item in ${file_list}
+						do
+							# Getting the full path for the file into a variable
+							image_file_fullpath="${item}"
+
+							# Getting the name of the file without the subject ID into a variable
+							image_name=`echo ${item} | awk -F/ '{print $NF}'`
+
+							# Getting the name of the file without the subject ID into a variable
+							image_name_noSUBJID=`echo ${item} | awk -F/ '{print $NF}' | sed 's!'${SUBJ}_'!!'`
+
+							# Getting the full path for folder holding image file into a variable
+							image_folder_fullpath=`echo ${item} | sed 's/'${image_name}'//'`
+
+							# FUNCTION CALL: Calling function "header_info_processed" to collect the info into variables. It needs 3 parameters: 1. the type of image being processed, 2. The filename without the subject ID, and 3. The full path to the file
+							header_info_processed ${image_type_contrast} ${image_name_noSUBJID} ${image_file_fullpath}
+
+							# FUNCTION CALL: Calling function "timeseries_motion_parameters_outliers_extraction" to extract info from motion parameters and motion outliers. It needs 5 parameters: 1. The filename, 2. The filename without subj ID, 3. The full path to the file, 4. The timeseries modality folder name, and 5. The timeseries modality contrast
+							timeseries_motion_parameters_outliers_extraction ${image_name} ${image_name_noSUBJID} ${image_folder_fullpath} ${modality_folder_name} ${modality_contrast}
+
+							# Reporting the variables contents to the output file. Note that the variable "metrics_info" holds the contents of the text file with all the information gathered using the "fsl_motion_outliers" tool
+							echo -e "${SUBJ}:${image_name}:${image_file_fullpath}:${image_type_contrast}:${modality_contrast}:${voxel_unit}:${time_unit}:${number_time_points}:${TR_value}:${TE_value}:${FA_value}:${voxel_dim_X}:${voxel_dim_Y}:${voxel_dim_Z}:${image_dim_X}:${image_dim_Y}:${image_dim_Z}:${mcflirt_ref_vol}:${motion_mean_absolute}:${motion_std_dev_absolute}:${motion_median_absolute}:${motion_min_absolute_raw}:${motion_min_absolute_TR}:${motion_max_absolute_raw}:${motion_max_absolute_TR}:${motion_mean_relative}:${motion_std_dev_relative}:${motion_median_relative}:${motion_min_relative_raw}:${motion_min_relative_TR}:${motion_max_relative_raw}:${motion_max_relative_TR}:${metrics_info}:${min_absolute_intensity}:${max_absolute_intensity}:${mean_4D_absolute}:${Std_Dev_absolute}:${min_robust_intensity}:${max_robust_intensity}:${mean_4D_nonzero}:${Std_Dev_nonzero}:${voxels_per_volume_absolute}:${voxels_per_volume_nonzero}:${area_per_volume_absolute}:${area_per_volume_nonzero}:"  >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+
+							# Cleaning the contents of the variables below used within the function "descript_stats_variables"
+							unset metrics_info
+							unset metrics_info_temp
+							unset outliers_fd_dvars_common
+							unset outliers_fd_dvars_common_temp
+							unset outliers_TR_temp_nospaces
+							unset outliers_fd_dvars_common_temp_nospaces
+						done
+
+					elif [ -z "${file_list}" ] # Warning the user in case this variable is empty
+					then
+						echo
+						echo -e "*** WARNING *** There are no \"${image_type_contrast}\" files listed for subject \"${SUBJ}\" ***" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+						echo -e "*** Please check it before re-running this script ***\n" | tee -a ${SUBJS_FOLDERS_PATH}/${SUBJ}/${SUBJ}_images_descriptive_stats.txt
+					fi
+				done
+			fi
+		done
+
+		# Tagging the end processing time
+		finish_processing=`current_date_time 2`
+
+		echo -e "Done collecting descriptive statistics for IMAGE files\n"
+
+		echo -e "All information was collected for all subjects sucessfuly\n"
+
+		echo -e "To load the output files into a spreadsheet like Excel, use the option \"Import text files\""
+		echo -e "For text files contaning \"descriptive statistics\", use \"separated by colon\"\n"
+
+		# Giving feedback to the user of the processing time
+		echo -e "Start time was: ${start_processing}"
+		echo -e "Finish time was: ${finish_processing}\n"
+
+		# Giving the option to the user to look at the temporary files created before erasing them
+		cd /tmp
+
+		echo -e "\n"
+		echo -e "\tIf you want to look at the temporary files created in this folder: ${temp_folder}"
+		echo -e "\tAnd the log files for the PPSS command, please do so before continuing to the main menu\n"
+
+		echo -e "\tOtherwise, all log files will be erased as soon as you press any key to continue\n"
+
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	*)
+		echo
+		echo -en "No valid option chosen "
+
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+# Removing the temporary folder and its contents
+rm -rf ${temp_folder} 2> /dev/null
+
+# Removing all log files after user input
+rm -r $PPSS_DIR/* 2> /dev/null

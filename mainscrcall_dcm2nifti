@@ -1,0 +1,686 @@
+#! /bin/bash
+
+# Convert DICOM files to Nifti
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+
+function remove_DICOM {
+# Asks if user wants to keep or delete the anatomical DICOM files
+while [ 1 ]
+do
+	echo -en "\tDo you want to keep the original DICOM files (RECOMMENDED)? (y/n) "
+	read keepdcm
+
+	case $keepdcm in
+	Y | y)
+		remove_dcm=0
+		break ;;
+	N | n)
+		remove_dcm=1
+		break ;;
+	*)
+		echo -e "Please enter \"y\" or \"n\"\n"
+		echo ;;
+	esac
+done
+}
+
+function convert_DICOM_func_resting {
+# This function will call the dinifti command to process the files listed
+cd ${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}
+
+for FFOLDER in ${FILE_LIST}
+do
+	echo
+	cd ${FFOLDER}/DICOM
+	echo -en "\tConverting DICOM files for folder \"${FFOLDER}\" "
+
+	dinifti -g --name="${SUBJ}_${FFOLDER}_orig" ./*.dcm ../ 2> /dev/null
+
+	cd ../..
+
+	# Checking if user want to remove DICOM files or not
+	if [ $remove_dcm = 1 ]
+	then
+		echo
+		echo -en "Removing DICOM files..."
+
+		rm -r ${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}/${FFOLDER}/DICOM
+	fi
+done
+
+echo -e "\n"
+echo -e "Finished converting ${datatype_lowercase} ${contrast_type} files to NIFTI"
+
+cd /tmp
+}
+
+function dcm2nifti_anat {
+# Converting ANATOMICAL runs
+
+# Changing directory to /tmp in case of error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Checking if the user wants to keep the DICOM files by using the function "remove_DICOM" - may want to keep for freesurfer analysis or to check it later on without needed to unzip the raw files
+remove_DICOM
+
+for SUBJ in ${SUBJLIST}
+do
+	echo -e "\n"
+	echo -e "************************************************************************************"
+	echo -e "Converting ANATOMICAL runs for subject ** ${SUBJ} ** to NIFTI format"
+	echo -e "************************************************************************************"
+
+	while [ 1 ]
+	do
+		# Checking if there anatomical files already in NIFTI format
+		anat_files_converted=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/*.nii.gz 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!'`
+
+		if [ -n "${anat_files_converted}" ]
+		then
+			echo -e "\n"
+			echo -e "*** Anatomical files in NIFTI format in the \"anat\" folder for this subject: ***\n"
+
+			for item in $anat_files_converted
+			do
+				echo $item
+			done
+		fi
+
+		echo -e "\n"
+		echo -e "Listing the DICOM folders holding the original files\n"
+
+		ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/DICOM* | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!' | sed "=" | sed 'N; s/\n/) /'
+
+		echo
+		echo -en "Please enter the number for the folder to be processed (choose ONLY 1; to *** SKIP *** hit ENTER): "
+		read DICOM_folder
+
+		# Checking if the variable "DICOM_folder" has contents, and if not skipping processing this subject
+		if [ -n "${DICOM_folder}" ] # IF the variable is non-zero, then processing will continue
+		then
+			# Collecting the DICOM folders available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+			var1_available=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/DICOM* | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+			var2_list="${DICOM_folder}" # The numbers chosen by the user corresponding to the files to be used
+
+			# Calling the function "numbered_list_display" to present the DICOM folders available in a numbered list to the user. Note the parameters to be passed on to the function
+			numbered_list_display "${var1_available}" "${var2_list}"
+
+			# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+			DICOM_folder=`echo ${files_to_use}`
+
+			# Cleaning the contents of the variables below
+			unset files_to_use
+
+			# Retrieving the contrast from the DICOM folder name, if present
+			CONTRAST=`echo ${DICOM_folder} | sed 's/DICOM_//'`
+
+			# Checking if the "CONTRAST" variable has: 1) content; 2) it is not "DICOM"; and if not asks the user to provide it
+			if [ -z "${CONTRAST}" ] || [ ${CONTRAST} = DICOM ]
+			then
+				echo
+				echo -en "Now enter the contrast for this anatomical (T1, T2, PD(=proton-density); if repeated use e.g. \"T1_01\" and \"T1_02\") "
+				read CONTRAST
+			fi
+
+			echo
+			echo -e "\nFolder entered: ${DICOM_folder}"
+			echo -e "Anatomical contrast type: ${CONTRAST}\n"
+
+			echo -en "\nIs this correct? (y/n) "
+			read conf
+
+			# Check if the functional runs entered are correct
+			if [ ${conf} = y ]
+			then
+				cd ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${DICOM_folder}
+
+				# Checking if there is not already a file named similarly
+				anat_file_present=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${SUBJ}_anat_${CONTRAST}.nii.gz 2> /dev/null`
+
+				if [ -n "${anat_file_present}" ]
+				then
+					echo -e "\n"
+					echo -e "\t*** There is a anatomical file already named as the file about to be processed! ***"
+					echo -e "\tPlease check this to prevent overwriting files for subject ### ${SUBJ} ###"
+					echo -en "\tPress any key to skip processing ANATOMICAL files for this subject "
+					read -n1 anykey
+
+					break
+				else
+					# Proceeding with DICOM to NIFTI conversion
+					echo
+					echo -en "Converting..."
+
+					# Converting the anatomical file and redirecting any output to /dev/null so not to confuse users with the warning that usually comes when converting anatomicals with dinifti
+					dinifti -g --name="${SUBJ}_anat_${CONTRAST}_orig" ./*.dcm ../ 2> /dev/null
+
+					cd /tmp
+
+					echo
+					echo -e "Done converting files for folder ${DICOM_folder}"
+
+					# Checking if user want to remove DICOM files or not
+					if [ $remove_dcm = 1 ]
+					then
+						echo
+						echo -en "Removing DICOM files..."
+
+						rm -r ${SUBJS_FOLDERS_PATH}/${SUBJ}/anat/${DICOM_folder}
+					fi
+
+					echo
+					echo -en "Do you want to convert another ANATOMICAL file for subject \"${SUBJ}\"?(y/n) "
+					read yesno
+
+					if [ $yesno = y ]
+					then
+						echo -en
+
+					elif [ $yesno = n ]
+					then
+						echo -e "\n"
+						echo -e "ANATOMICAL files converted to Nifti"
+
+						break
+					fi
+
+					cd /tmp
+				fi
+			else
+				echo
+				echo -en "Please correct the information entered "
+
+				unset read CONTRAST
+				sleep 2
+			fi
+		else
+			echo -e "\n"
+			echo -en "Skipping ANATOMICAL file conversion to nifti for subject \"${SUBJ}\" "
+			sleep 2
+
+			break
+		fi
+	done
+done
+}
+
+function dcm2nifti_func_resting {
+# Converting FUNCTIONAL and RESTING runs
+
+##### VARIABLES TO BE USED IN THIS FUNCTION AND SUBSEQUENT ONES #####
+# Variable holding data type to be processed
+data_type=$1
+
+contrasts_available="BOLD ASL"
+
+datatype_lowercase=`echo ${data_type} | tr '[:upper:]' '[:lower:]'`
+
+# Checking what kind of data will be processed, and defining needed variables accordingly
+if [ ${data_type} = FUNCTIONAL ]
+then
+	folder_name=func
+
+elif [ ${data_type} = RESTING ]
+then
+	folder_name=rest
+fi
+#####################################################################
+
+# Changing directory to /tmp in case of error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Cheacking if the user wants to keep the DICOM files by using the function "remove_DICOM" - may want to check image parameters in the original files
+remove_DICOM
+
+# Allowing the user to enter the contrasts for the images to be processed
+while [ 1 ]
+do
+	echo
+	echo -e "Please choose the contrasts for the images to be processed:\n"
+
+	# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+	# Establishing tne initial contrast numbering
+	contrast_number=1
+
+	for contrast in ${contrasts_available}
+	do
+		echo "${contrast_number}) ${contrast}"
+
+		# adding a unit to the numbering variable
+		contrast_number=$[ $contrast_number + 1 ]
+	done
+
+	# Cleanig the contents of the numbering variable
+	unset contrast_number
+
+	# Now asking for user input to which subjects are to have their files re-oriented
+	echo
+	echo -en "Enter here the number for each contrast to be used (use space in between if more than one, enter \"all\" for the whole list): "
+	read contrasts_choosen
+
+	if [ -n "${contrasts_choosen}" ] && [ "${contrasts_choosen}" != all ] # Checking if this variable is non-zero in length and does NOT include all contrasts listed
+	then
+		# Establishing tne initial contrast numbering
+		contrast_number=1
+
+		# Collecting the contrasts into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+		var1_available=`for contrast in ${contrasts_available}; do echo "${contrast_number}=${contrast}"; contrast_number=$[ $contrast_number + 1 ]; done` # variable with all the files in a numbered list
+		var2_list=${contrasts_choosen} # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		contrast_choosen="${files_to_use}"
+
+		# Cleaning the contents of the variables below
+		unset files_to_use
+
+	elif [ -n "${contrasts_choosen}" ] && [ "${contrasts_choosen}" = all ] # Checking if this variable is non-zero in length and does NOT include all contrasts listed
+	then
+		# Collecting all contrasts listed into the variable "contrast_choosen"
+		contrast_choosen="${contrasts_available}"
+	fi
+
+	echo
+	echo -e "You have selected the following contrasts:\n"
+
+	# Establishing tne initial contrast numbering
+	contrast_number=1
+
+	for contrast in ${contrast_choosen}
+	do
+		echo "${contrast_number}) ${contrast}"
+
+		# adding a unit to the numbering variable
+		contrast_number=$[ $contrast_number + 1 ]
+	done
+
+	# Cleaning the contents of the numbering variable
+	unset contrast_number
+
+	echo
+	echo -en "Is this correct?(y/n) "
+	read yesno
+
+	if [ ${yesno} = y ]
+	then
+		contrast_list="${contrast_choosen}"
+		break
+	else
+		echo
+		echo -en "Please corrected the contrasts entered "
+
+		# Cleaning the contents for the variable below for correction
+		unset contrasts_choosen
+
+		sleep 2
+	fi
+done
+
+echo
+echo -e "Do you want:"
+echo -e "\t1) ALL ${datatype_lowercase} folders (+field maps if present) within the \"subject/func\" folder to be processed or"
+echo -en "\t2) You want to choose which ones? "
+read PROCESS_ALL_SELECTED
+
+for SUBJ in ${SUBJLIST}
+do
+	for contrast_type in ${contrast_list}
+	do
+		echo
+		echo -e "************************************************************************************"
+		echo -e "Converting ${data_type} ${contrast_type} runs for subject ** ${SUBJ} ** to NIFTI format"
+		echo -e "************************************************************************************"
+
+		echo
+		echo -e "Searching ${datatype_lowercase} ${contrast_type} runs"
+
+		# Collecting all folders available
+		FILE_LIST=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}/*${contrast_type}* 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}/'!!' 2> /dev/null`
+
+		# Checking if there folders to be processed, and if so proceeding
+		if [ -n "${FILE_LIST}" ]
+		then
+			# Checking if all files are to be processed or if the user wants to choose which ones
+			if [ ${PROCESS_ALL_SELECTED} = 1 ] # If 1 (yes), user chose to process ALL files
+			then
+				echo -en
+			elif [ ${PROCESS_ALL_SELECTED} = 2 ] # If 2, user will choose which files
+			then
+				# Allowing user to see all files available, then choose the ones to be converted
+				while [ 1 ]
+				do
+					# Confirming if folders listed are correct
+					echo -e "\n"
+					echo -e "\tFolders containing ${datatype_lowercase} ${contrast_type} runs\n"
+
+					ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}/*${contrast_type}* 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}/'!!' 2> /dev/null | sed "=" | sed 'N; s/\n/) /'
+
+					echo
+					echo -en "Enter the number(s) corresponding to the folder(s) containing ${datatype_lowercase} ${contrast_type} runs/field maps to be processed (if more than one, separate with spaces): "
+					read FILE_LIST
+
+					# Collecting the DICOM folders available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+					var1_available=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}/*${contrast_type}* 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/${folder_name}/'!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+					var2_list="${FILE_LIST}" # The numbers chosen by the user corresponding to the files to be used
+
+					# Calling the function "numbered_list_display" to present the DICOM folders available in a numbered list to the user. Note the parameters to be passed on to the function
+					numbered_list_display "${var1_available}" "${var2_list}"
+
+					# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+					FILE_LIST="${files_to_use}"
+
+					# Cleaning the contents of the variables below
+					unset files_to_use
+
+					echo
+					echo -e "Folders entered:\n"
+
+					for item in ${FILE_LIST}
+					do
+						echo ${item}
+					done
+
+					echo
+					echo -en "\nIs this correct? (y/n) "
+					read conf
+
+					# Check if the files entered are correct
+					if [ ${conf} = y ]
+					then
+						break
+					else
+						echo
+						echo -en "Please correct ${datatype_lowercase} ${contrast_type} runs entered "
+						sleep 2
+					fi
+				done
+			fi
+
+			#### Calling function "convert_DICOM_func_resting" to proceed with conversion process proper #####
+			convert_DICOM_func_resting
+
+			# Cleaning contents of folders list variables
+			unset FILE_LIST
+		else
+			echo -e "\n"
+			echo -e "*** No ${data_type} ${contrast_type} files found to be converted - moving on ***"
+			echo -e "*** If this is unexpected, make sure that your folders are named with the contrasts used, e.g. frun01_${contrast_type}_heat ***"
+		fi
+	done
+done
+}
+
+function dcm2nifti_DWI {
+# Converting DWI runs
+
+# Changing directory to /tmp in case of error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Checking if the user wants to keep the DICOM files by using the function "remove_DICOM" - may want to keep to check it later on without needed to unzip the raw files
+remove_DICOM
+
+for SUBJ in ${SUBJLIST}
+do
+	echo -e "\n"
+	echo -e "*************************************************************************************************************"
+	echo -e "Converting DWI runs for subject ** ${SUBJ} ** to Nifti format and creating the \"bvals\" and \"bvecs\" files"
+	echo -e "*************************************************************************************************************"
+
+	# Collecting all DWI folders
+	DWI_folder_list=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/DWI* 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/'!!'`
+
+	# Checking if there BOLD folders to be processed, and if so proceeding
+	if [ -n "${DWI_folder_list}" ]
+	then
+		# Converting the main DWI file and creating the bvecs and bvals files
+		for DWI_folder in ${DWI_folder_list}
+		do
+			cd ${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/${DWI_folder}
+
+			echo -e "\n"
+			echo -en "\tConverting dcm files for DWI run \"${DWI_folder}\"..."
+
+############# HAVE TO USE DCM2NII COMMAND TO GENERATE THE BVECS AND BVALS FILES #######################
+
+# From the website: http://www.mccauslandcenter.sc.edu/mricro/mricron/dcm2nii.html
+# Checked in 2012, Feb 20
+# # Diffusion data
+# # Diffusion sequences are sensitive to the random spontaneous motion of water molecules. This movement is anisotropic in fiber bundles - in other words it preferentially moves up and down the fibers whereas motion across the fiber is constrained. Diffusion weighted imaging (DWI) use different gradient directions so that different images are sensitive to specific directions. In order to process this data with medINRIA or FSL, you need to extract the diffusion direction information as well as the images. For these images, dcm2nii will attempt to generate .bvec and .bval text files. This information is extracted from the DICOM header (for Siemens data the software attempts to read the "B_value" and "DiffusionGradientDirection" fields from the CSA header).
+
+			dcm2nii -o ${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/${DWI_folder} DICOM/*.dcm &> /dev/null # Redirecting both STDOUT and STDERR since "dcm2nii" outputs lots of info to the screen when ran
+
+			# Renaming the files created by "dcm2nii"
+			mv *.nii.gz data_DWI_orig.nii.gz # Renaming the DWI file to "data.nii.gz" as preferred by FSL tools
+			mv *.bval bvals # Renaming the "bvals" file to "bvals" as preferred by FSL tools
+			mv *.bvec bvecs # Renaming the "bvecs" file to "bvecs" as preferred by FSL tools
+
+			cd ..
+
+			# Checking if user want to remove DICOM files or not
+			if [ $remove_dcm = 1 ]
+			then
+				echo
+				echo -en "Removing DICOM files..."
+
+				rm -r ${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/${DWI_folder}/DICOM
+			fi
+		done
+
+		###### Converting the FIELDMAP files, if any ######
+		# Going to the appropriate folder
+
+		# Storing the fieldmap folders into a variable
+		FIELDMAP_DWI=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/fieldmap_* 2> /dev/null | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/'!!'`
+
+		if [ -n "${FIELDMAP_DWI}" ] # Checking if this variable has content (= fieldmap files)
+		then
+			for fieldmap in ${FIELDMAP_DWI}
+			do
+				echo -e "\n"
+				echo -en "\tConverting dcm files for fieldmap folder \"${fieldmap}\"..."
+
+				cd ${SUBJS_FOLDERS_PATH}/${SUBJ}/DWI/${fieldmap}/DICOM
+
+				dinifti -g --name="${SUBJ}_${fieldmap}_orig" ./*.dcm ../ 2> /dev/null
+
+				cd ../..
+			done
+		else
+			echo -e "\n"
+			echo -e "*** No fieldmap for DWI files found to be converted - moving on ***"
+		fi
+	else
+		echo -e "\n"
+		echo -e "*** No DWI files found to be converted - moving on ***"
+	fi
+
+	# Cleaning contents of folders list variables
+	unset DWI_folder_list
+	unset FIELDMAP_DWI
+
+	echo -e "\n"
+	echo -e "\tDWI runs for subject \"${SUBJ}\" converted to Nifti succesfully"
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+# Script Main menu - Entering the functions with the tasks in order
+clear
+cd /tmp
+
+echo -e "\tThis program will convert your DICOM files to NIFTI format"
+echo -e "\tIt will use the \"dinifti\" program obtained from: http://cbi.nyu.edu/software/dinifti.php"
+echo -e "\tFor DWI files, it will use the \"dcm2nii\" program from: http://www.cabiatl.com/mricro/mricron/dcm2nii.html"
+echo -e "\tSince besides converting DICOM into nifti files it also generates the needed bvecs and bvals files "
+
+# Ask for user input to continue
+while [ 1 ]
+do
+	echo -e "\n"
+	echo -e "Do you want to convert:"
+	echo -e "\t1. Anatomical + Functional files (+ field maps if present)"
+	echo -e "\t1.1. Anatomical files only"
+	echo -e "\t1.2. Functional files only (+ field maps if present)\n"
+
+	echo -e "\tOther file types:"
+	echo -e "\t2. Resting runs (BOLD, ASL) (+ field maps if present) files"
+	echo -e "\t3. Diffusion weighted imaging (DWI) (+ field maps if present) files\n"
+
+	echo -e "\t0. Back to main menu\n"
+
+	echo -en "\t\tEnter your option here and press enter: "
+	read convert
+
+	case ${convert} in
+	0)
+		echo
+		break ;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dcm2nifti:Convert the original DICOM files into NIFTI format" none "(dcm2nifti_anat, convert_DICOM_func_resting) dinifti"
+
+		echo -e "\n\n"
+		echo -e "Converting *** ANATOMICAL *** DICOM files\n"
+
+		# Calling functions "dcm2nifti_anat" and "dcm2nifti_func"
+		dcm2nifti_anat
+
+		clear
+
+		echo -e "\n\n"
+		echo -e "Converting *** FUNCTIONAL *** DICOM files\n"
+
+		# Calling function "dcm2nifti_func_resting" with the appropriate parameter
+		dcm2nifti_func_resting FUNCTIONAL
+
+		echo
+		echo -e "Finished converting all DICOM files\n"
+
+		# Ask for user input to continue
+		echo -en "To continue, press any key "
+		read -n1 yes
+
+		break
+		;;
+	1.1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dcm2nifti:Convert the original DICOM files into NIFTI format" none "(dcm2nifti_anat) dinifti"
+
+		echo -e "\n\n"
+		echo -e "\tConverting *** ANATOMICAL *** files only\n"
+
+		# Calling function "dcm2nifti_anat"
+		dcm2nifti_anat
+
+		echo
+		echo -e "Finished converting ANATOMICAL files\n"
+
+		# Ask for user imput to continue
+		echo -en "To continue, press any key "
+		read -n1 yes
+
+		break
+		;;
+	1.2)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dcm2nifti:Convert the original DICOM files into NIFTI format" none "(convert_DICOM_func_resting) dinifti"
+
+		echo -e "\n\n"
+		echo -e "\tConverting *** FUNCTIONAL *** files only\n"
+
+		# Calling function "dcm2nifti_func_resting" with the appropriate parameter
+		dcm2nifti_func_resting FUNCTIONAL
+
+		echo
+		echo -e "Finished converting all FUNCTIONAL files\n"
+
+		# Ask for user input to continue
+		echo -en "To continue, press any key "
+		read -n1 yes
+
+		break
+		;;
+	2)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dcm2nifti:Convert the original DICOM files into NIFTI format" none "(convert_DICOM_func_resting) dinifti"
+
+		echo -e "\n\n"
+		echo -e "\tConverting *** RESTING *** files\n"
+
+		# Calling function "dcm2nifti_func_resting" with the appropriate parameter
+		dcm2nifti_func_resting RESTING
+
+		echo
+		echo -e "Finished converting all RESTING files\n"
+
+		# Ask for user input to continue
+		echo -en "To continue, press any key "
+		read -n1 yes
+
+		break
+		;;
+	3)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dcm2nifti:Convert the original DICOM files into NIFTI format" none "(dcm2nifti_DWI) dcm2nii"
+
+		echo -e "\n\n"
+		echo -e "\tConverting *** DWI *** files\n"
+
+		# Calling function "dcm2nifti_DWI"
+		dcm2nifti_DWI
+
+		echo
+		echo -e "Finished converting all DWI files\n"
+
+		# Ask for user input to continue
+		echo -en "To continue, press any key "
+		read -n1 yes
+
+		break
+		;;
+	*)
+		echo -e "\n"
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 2 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished. 2. List of the subjects processed
+log_file_scripts_used finish "${SUBJLIST}"

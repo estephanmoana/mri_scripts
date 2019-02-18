@@ -1,0 +1,609 @@
+#! /bin/bash
+
+# Process tag-control subtraction for ASL files #
+# Uses the FSL tool "asl_file"
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING FMRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function mean_controlvols1 {
+# This function will extract the control volumes for each ASL timeseries for each subject. It will also generate the command file for PPSS processing
+
+##### STEP 01: Generate the numbered sequence for selection of control volumes #####
+
+# Giving feedback to the user
+echo
+echo -en "##### Extracting the control volumes from the ASL timeseries #####"
+
+# Checking the data order for ASL timeseries
+if [ ${data_order} = tc ] # First volume is tag (0), meaning that control volumes are odd numbers
+then
+	# Variable to hold first control voume number
+	first_controlvol=1
+
+	# Variable with control volumes numbers. Using the command "seq" with option "-s" to separate output values by spaces instead of newline (default)
+	controlvols_list=`seq -s " " ${first_controlvol} 2 ${last_vol_timeseries}`
+
+elif [ ${data_order} = ct ] # First volume is control (0), meaning that control volumes are even numbers
+then
+	# Variable to hold first control voume number
+	first_controlvol=0
+
+	# Variable with control volumes numbers. Using the command "seq" with option "-s" to separate output values by spaces instead of newline (default)
+	controlvols_list=`seq -s " " ${first_controlvol} 2 ${last_vol_timeseries}`
+fi
+
+for SUBJ in ${SUBJLIST}
+do
+	# Creating a subfolder for this subject within the main output folder
+	mkdir -p ${asl_output_folder_path}/${SUBJ}/control_vols 2> /dev/null
+
+	for item in `ls ${asl_mainfolder_path}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}??_${modality_contrast}/*${inputfile_marker}.nii.gz`
+	do
+		# Variable to keep count of the control volumes outputed by "fsl_roi"
+		count=0
+
+		# Getting only the file name, without extension, into a variable
+		file_name_noextension=`echo ${item} | sed 's!'${asl_mainfolder_path}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}.._${modality_contrast}/'!!g' | sed 's/.nii.gz//'`
+
+		# Checking if the number of volumes entered by the user matches this ASL timeseries
+		if [ ${last_vol_timeseries} != `fslval ${item} dim4` ]
+		then
+			echo
+			echo -e "*** WARNING *** The number of volumes entered does not match the number of volumes for this ASL timeseries"
+			echo -e "Number of volumes entered: ${last_vol_timeseries}"
+			echo -e "Number of volumes for \"${file_name_noextension}\": `fslval ${item} dim4`"
+
+			echo
+			echo -e "Please correct this before proceeding"
+			echo -en "Press any key to exit to the PROCESSING menu "
+			read -n 1 anykey
+
+			exit
+		fi
+
+		for item2 in ${controlvols_list}
+		do
+			# Adding a unit to the counting variable
+			((count++))
+
+			# Assigning another variable to number so is zero padded
+			counter=`printf "%02d" $count`
+
+			###### Creating the "fsl_roi" command for PPSS processing. It will extract one control volume at a time and assing an unique file name to it. #####
+			echo -e "fslroi ${item} ${asl_output_folder_path}/${SUBJ}/control_vols/${file_name_noextension}_vol_${counter} ${item2} 1" >> ${temp_folder}/${ppss_command_file1}
+			###################################################################
+		done
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: fslroi; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step01_fslroi_${file_name_noextension}.txt
+
+		echo -e "Command fslroi to extract the control images into individual files" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step01_fslroi_${file_name_noextension}.txt
+
+		echo -e "\nfslroi ${item} ${asl_output_folder_path}/${SUBJ}/control_vols/${file_name_noextension}_vol_${counter} ${item2} 1" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step01_fslroi_${file_name_noextension}.txt
+		###############################
+	done
+done
+}
+
+function mean_controlvols2 {
+# This function will generate the mean image of control volumes for each restingASL run for each subject using "fslmaths". It will also generate the command file for PPSS processing
+
+# Giving feedback to the user
+echo
+echo -en "##### Computing the mean ASL control image to be used as a calibration for processing using \"oxford_asl\" #####"
+
+for SUBJ in ${SUBJLIST}
+do
+	# Checking how many ASL timeseries this subject has
+	for item in `ls ${asl_output_folder_path}/${SUBJ}/${SUBJ}_*_diff.nii.gz` # List all files tag-control difference files for the subject
+	do
+		# Extracting just the "resting0X" of the filename
+		ASLrun=`echo ${item} | awk -F/ '{print $NF}' | awk -F_ '{print $3}'`
+
+		ASLtimeseries_runlist="${ASLtimeseries_runlist} ${ASLrun}"
+	done
+
+	# Preparing the fslmaths command parameters for the mean control image calculation
+	# Loop through each ASL timeseries for this subject
+	for item in ${ASLtimeseries_runlist}
+	do
+		# Variable to keep count of the control volumes
+		count_controlvols=1
+
+		# Loop through each control volume
+		for item2 in `ls ${asl_output_folder_path}/${SUBJ}/control_vols/*_${item}_*_vol_*`
+		do
+			# Assigning another variable to number so is zero padded
+			counter=`printf "%02d" ${count_controlvols}`
+
+			# Checking if this is the first volume
+			if [ ${counter} = 01 ]
+			then
+				vol_1st=${item2}
+			else
+				remainder_vols="${remainder_vols} -add ${item2}"
+			fi
+
+			# Adding a unit to the variable "count"
+			((count_controlvols++))
+		done
+
+		# Removing a unit form the variable holding the number of images to use in "fslmaths" (the loop above will always add another unit after all images have benn processed)
+		((count_controlvols--))
+
+		##### Creating the "fslmaths" command to be run by PPSS #####
+		echo -e "fslmaths ${vol_1st} ${remainder_vols} -div ${count_controlvols} ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean" >> ${temp_folder}/${ppss_command_file2}
+		#############################################################
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: fslmaths; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step02_fslmaths_${SUBJ}_${item}_ASL_controlvols_mean.txt
+
+		echo -e "Command to create mean of control images" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step02_fslmaths_${SUBJ}_${item}_ASL_controlvols_mean.txt
+
+		echo -e "\nfslmaths ${vol_1st} ${remainder_vols} -div ${count_controlvols} ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step02_fslmaths_${SUBJ}_${item}_ASL_controlvols_mean.txt
+		###############################
+
+		# Cleaning the contents of the variables below
+		unset ASLtimeseries_runlist remainder_vols
+	done
+done
+}
+
+function mean_controlvols3 {
+# This function will make copies of the mean images and concatenate them in time using “fslmerge”. It will also generate the command file for PPSS processing.
+
+# Giving feedback to the user
+echo
+echo -en "##### Creating copies of the control volumes mean image, extracting non-brain tissue from it and concatenating them (with skull) in time using \"fslmerge\" ##### "
+
+for SUBJ in ${SUBJLIST}
+do
+	# Stating the variable below clean (so previous loops won't cause a problem carrying over values)
+	ASLtimeseries_runlist=""
+
+	# Checking how many ASL timeseries this subject has
+	for item in `ls ${asl_output_folder_path}/${SUBJ}/${SUBJ}_*_diff.nii.gz` # List all files tag-control difference files for the subject
+	do
+		# Extracting just the "resting0X" of the filename
+		ASLrun=`echo ${item} | awk -F/ '{print $NF}' | awk -F_ '{print $3}'`
+
+		ASLtimeseries_runlist="${ASLtimeseries_runlist} ${ASLrun}"
+	done
+
+	# Making copies of the control images mean to later concatenate in 4D
+	# Loop through each ASL timeseries for this subject
+	for item in ${ASLtimeseries_runlist}
+	do
+		# Variable to keep count of the control volumes mean image
+		count_controlvols_meanimg=0
+
+		# Loop through each control volume
+		for item2 in `ls ${asl_output_folder_path}/${SUBJ}/control_vols/*_${item}*_vol_*`
+		do
+			# Adding a unit to this variable
+			((count_controlvols_meanimg++))
+
+			# Assigning another variable to number so is zero padded
+			counter=`printf "%02d" ${count_controlvols_meanimg}`
+
+			# Making copies of the mean of control images
+			cp ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean.nii.gz ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean_copy_${counter}.nii.gz
+
+			# Making a copy of the mean of control images to the subject folder (this will be used for processing of "oxford_asl" later)
+			cp ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean.nii.gz ${asl_output_folder_path}/${SUBJ}/
+		done
+
+		# Extracting non-brain tissues from the mean of control images using BET with default parameters
+		bet ${asl_output_folder_path}/${SUBJ}/${SUBJ}_${item}_ASL_controlvols_mean.nii.gz ${asl_output_folder_path}/${SUBJ}/${SUBJ}_${item}_ASL_controlvols_mean_brain.nii.gz
+
+		# Variable holding all the copies of the control volumes mean image
+		controlvols_meanimg_copieslist=`ls ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean_copy_*.nii.gz`
+
+		###### Creating the "fslmerge" command to make a 4D file from the copies of the mean of control images. Note the "echo" command for the variable "controlvols_meanimg_copieslist" so it does not put "newlines" from the "ls" command. #####
+		echo -e "fslmerge -t ${asl_output_folder_path}/${SUBJ}/${SUBJ}_${item}_ASL_controlvols_mean_calib `echo ${controlvols_meanimg_copieslist}`" >> ${temp_folder}/${ppss_command_file3}
+		######################################################################################
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		# For the "cp" command
+		echo -e "Date and time: `current_date_time 2`" > ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step03_cp_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "Copy command for making copies of the mean of control images" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step03_cp_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "\ncp ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean.nii.gz ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean_copy_${counter}.nii.gz" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step03_cp_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step03_cp_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "Copy command for making a copy of the mean of control images to the subject folder (this will be used for processing of \"oxford_asl\" later)" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step03_cp_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "\ncp ${asl_output_folder_path}/${SUBJ}/control_vols/${SUBJ}_${item}_ASL_controlvols_mean.nii.gz ${asl_output_folder_path}/${SUBJ}/" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step03_cp_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+		#####
+
+		# For the "BET" command
+		echo "OS name and version: ${os_nameandversion}; Command: bet; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step04_bet_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "BET command for extracting non-brain tissues from the mean of control images using BET with default parameters" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step04_bet_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "\nbet ${asl_output_folder_path}/${SUBJ}/${SUBJ}_${item}_ASL_controlvols_mean.nii.gz ${asl_output_folder_path}/${SUBJ}/${SUBJ}_${item}_ASL_controlvols_mean_brain.nii.gz" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step04_bet_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+		#####
+
+		# For the "fslmerge" command
+		echo "OS name and version: ${os_nameandversion}; Command: fslmerge; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step05_fslmerge_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "Command for creating the \"fslmerge\" command to make a 4D file from the copies of the mean of control images" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step05_fslmerge_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+
+		echo -e "\nfslmerge -t ${asl_output_folder_path}/${SUBJ}/${SUBJ}_${item}_ASL_controlvols_mean_calib `echo ${controlvols_meanimg_copieslist}`" >> ${asl_output_folder_path}/${SUBJ}/LOGFILE_controlvolsmean_step05_fslmerge_${SUBJ}_${item}_ASL_controlvols_mean_calib.txt
+		#####
+	done
+
+	# Cleaning the contents of the variable below
+	unset ASLtimeseries_runlist
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_ASL-tag-control-subtraction # Where the temporary files will be held
+ppss_command_file1=AScontrolvols_fslroi_list.txt
+ppss_command_file2=AScontrolvols_fslmaths_list.txt
+ppss_command_file3=AScontrolvols_fslmerge_list.txt
+
+# Variables to establish imaging modality
+modality_folder_name=rest
+modality_subfolder_name=resting
+modality_contrast=ASL
+
+asl_mainfolder_path=${SUBJS_FOLDERS_PATH} # Where the subjects folders are. Can be modified by the user in this script.
+asl_folder_processed=processed_asl_data # Where the output of ASL-related FSL tools will be saved (within each subjects folder)
+asl_output_folder_path=${asl_mainfolder_path}/${asl_folder_processed}
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+clear
+
+# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+# Anouncing the purpose of this script
+echo -e "####################################"
+echo -e "##### ASL CONTROL VOLUMES MEAN #####"
+echo -e "####################################"
+
+##### GATHERING THE PATH TO THE ANALYSIS FOLDER #####
+# FUNCTION CALL: calls the function "analysis_mainfolder" in "mainscrcall_funclib" to allow the user to select the path to the subject's folders
+analysis_mainfolder ASL_original
+
+# Assigning the output variable from the function above to a local variable
+asl_mainfolder_path=${ANALYSIS_MAINFOLDER_PATH}
+######################################################
+
+# Giving instructions to the user
+echo
+echo -e "This program will create a *** MEAN IMAGE OF CONTROL VOLUMES *** from ASL timeseries files"
+echo -e "This MEAN IMAGE can then be used as a calibration image to use later within the \"oxford_asl\" tool from FSL"
+echo -e "### WARNING ### This is only valid for * NO BACKGROUND SUPRESSED timeseries *"
+echo -e "Make sure that you ASL timeseries does not have background supression done during acquisition"
+
+###### Warning the user about the use of parallel processing with PPSS later on this script #####
+echo
+echo -e "### This script will need to use PPSS to do parallel processing, so please choose the number of parallel processes allowed ###"
+
+# FUNCTION CALL: calling the function "number_processors_RAM_available" to determine how many processors to be used and amount of RAM memory available
+number_processors_RAM_available
+#################################
+
+echo
+echo -e "This processing will be done using the \"fsl_roi\" tool from FSL"
+echo -e "Some initial information is needed prior to processing. Please choose below:"
+
+# While loop for user input
+while [ 1 ]
+do
+	echo
+	echo -en "\tTotal number of volumes in the ASL timeseries (check with command \"fslval ASLtimeseries.nii.gz dim4\"): "
+	read ASLvols_user
+
+	echo
+	echo -en "\tData file for input is (1) ORIGINAL or (2) MOTION CORRECTED: "
+	read inputfile_origmoco_user
+
+	echo
+	echo -en "\tData order is (1) TAG-CONTROL or (2) CONTROL-TAG: "
+	read data_order_user
+
+	echo
+	echo -en "\tFULL PATH for the folder to hold ** OUTPUT ** from \"asl_file\" (Hit ENTER for DEFAULT=${asl_output_folder_path}): "
+	read asl_output_folder_path_user
+
+	# Translating the user's response into strings
+
+	# For Data file for input
+	if [ -n "${inputfile_origmoco_user}" ] && [ ${inputfile_origmoco_user} = 1 ]
+	then
+		inputfile_origmoco_user=original
+
+	elif [ -n "${inputfile_origmoco_user}" ] && [ ${inputfile_origmoco_user} = 2 ]
+	then
+		inputfile_origmoco_user="motion_corrected"
+	else
+		inputfile_origmoco_user="not entered"
+	fi
+
+	# For Data order
+	if [ -n "${data_order_user}" ] && [ ${data_order_user} = 1 ]
+	then
+		data_order_user=tag-control
+
+	elif [ -n "${data_order_user}" ] && [ ${data_order_user} = 2 ]
+	then
+		data_order_user=control-tag
+	else
+		data_order_user="not entered"
+	fi
+
+	# For output folder path
+	if [ -z "${asl_output_folder_path_user}" ]
+	then
+		# In this case, the user hit ENTER thus it will be used the DEFAULT path
+		asl_output_folder_path_user=${asl_output_folder_path}
+	fi
+
+	# Asking user's confirmation of data entered
+	echo -e "\n"
+	echo -e "Information entered:"
+
+	echo -e "\tData file for input: ${inputfile_origmoco_user}"
+	echo -e "\tData order: ${data_order_user}"
+	echo -e "\tTotal number of volumes in ASL timeseries: ${ASLvols_user}"
+	echo -e "\tOutput folder path: ${asl_output_folder_path_user}"
+
+	echo
+	echo -en "Is this correct? (y/n) "
+	read yesno
+
+	if [ -n "${yesno}" ] && [ ${yesno} = y ]
+	then
+		# Assigning the values for the variables to be used for processing
+		if [ ${data_order_user} = tag-control ]
+		then
+			data_order=tc
+
+		elif [ ${data_order_user} = control-tag ]
+		then
+			data_order=ct
+		fi
+
+		last_vol_timeseries=${ASLvols_user}
+		asl_output_folder_path=${asl_output_folder_path_user}
+
+		break
+	else
+		echo
+		echo -en "Please correct the information entered "
+
+		sleep 1
+
+		# To have a newline between the sentence above and the next (if used in the next, it will make it have 2 newlines)
+		echo
+	fi
+done
+
+##### Data file for input #####
+# This will determine if will use the original ASL timeseries or the motion corrected
+if [ ${inputfile_origmoco_user} = original ]
+then
+	echo
+	echo -e "This script will look for a file in this folder:\n${asl_mainfolder_path}/subjID/rest/resting0?_ASL/filename_stdMNI.nii.gz"
+
+	# Assigning the user's decision to a variable
+	inputfile_marker=_stdMNI
+
+elif [ ${inputfile_origmoco_user} = motion_corrected ]
+then
+	echo
+	echo -e "*** To use motion corrected ASL timeseries, you must have ran MCFLIRT on the original timeseries ***"
+	echo -e "This script will look for a file in this folder:\n${asl_mainfolder_path}/subjID/rest/resting0?_ASL/filename_mcf.nii.gz"
+
+	# Assigning the user's decision to a variable
+	inputfile_marker=_mcf
+fi
+
+echo
+echo -e "\t1. Proceed with generation of MEAN OF CONTROL VOLUMES"
+echo -e "\t0. Back to main menu\n"
+
+# Ask for user input to continue
+echo -en "Please enter your option: "
+read proceed
+
+while [ 1 ]
+do
+	case ${proceed} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+		sleep 2
+
+		break
+		;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrcall_ASL_controlvolsmean:Creates a mean image of control volumes" FSL "(mean_controlvols) fslroi"
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "These are the subjects listed for processing and the respective input file(s):\n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing the initial subject numbering
+		count=1
+
+		for SUBJ in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo
+			echo "${counter}) ${SUBJ}"
+
+			# Showing the input files
+			if [ ${inputfile_marker} = _stdMNI ]
+			then
+				# Gathering the files available into a variable. Note the use of dots as wildcards for a single character (like "?" in the terminal)
+				inputfile_listed=`ls ${asl_mainfolder_path}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}??_${modality_contrast}/*${inputfile_marker}.nii.gz 2> /dev/null | sed 's!'${asl_mainfolder_path}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}.._${modality_contrast}/'!!g'`
+
+				# Checking if there are files listed
+				if [ -n "${inputfile_listed}" ]
+				then
+					echo -e "Input files: \n${inputfile_listed}"
+				else
+					echo -e "Input files: ** None found **"
+				fi
+
+			elif [ ${inputfile_marker} = _mcf ]
+			then
+				# Gathering the files available into a variable. Note the use of dots as wildcards for a single character (like "?" in the terminal)
+				inputfile_listed=`ls ${asl_mainfolder_path}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}??_${modality_contrast}/*${inputfile_marker}.nii.gz 2> /dev/null | sed 's!'${asl_mainfolder_path}/${SUBJ}/${modality_folder_name}/${modality_subfolder_name}.._${modality_contrast}/'!!g'`
+
+				# Checking if there are files listed
+				if [ -n "${inputfile_listed}" ]
+				then
+					echo -e "Input files: \n${inputfile_listed}"
+				else
+					echo -e "Input files: ** None found **"
+				fi
+			fi
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the variable below
+		unset count counter
+
+		# Warning the user about the script assumptions
+		echo
+		echo -e "*** Please note that this script will use the ASL timeseries files listed above ***"
+		echo -e "If they are not correct, you should abort now pressing \"Ctrl + c\""
+		echo -en "Otherwise, press any key to continue "
+		read -n1 anykey
+
+		# Telling the user that processing will start now
+		echo
+		echo -e "### Start processing generation of MEAN OF CONTROL VOLUMES for all subjects ###"
+
+		# FUNCTION CALL: Calls the function "mean_controlvols1" to extract the control volumes for each ASL timeseries for each subject. It will also generate the command file for PPSS processing
+		mean_controlvols1
+
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file1}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 4 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run; 3) Signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there; 4) Number of parallel processes to be run (chosen beforehand within this script).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file1} local_script ${number_processors_to_use}
+
+			echo
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		# FUNCTION CALL: Calls the function "mean_controlvols2" to generate the mean image of control volumes for each restingASL run for each subject using "fslmaths". It will also generate the command file for PPSS processing
+		mean_controlvols2
+
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file2}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 4 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run; 3) Signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there; 4) Number of parallel processes to be run (chosen beforehand within this script).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file2} local_script ${number_processors_to_use}
+
+			echo
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		# FUNCTION CALL: Calls the function "mean_controlvols3" to make copies of the mean images and concatenate them in time using “fslmerge”. It will also generate the command file for PPSS processing.
+		mean_controlvols3
+
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file3}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 4 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run; 3) Signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there; 4) Number of parallel processes to be run (chosen beforehand within this script).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file3} local_script ${number_processors_to_use}
+
+			echo
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		# Ask for user input to continue
+		echo
+		echo -e "*** Attention *** all control volume file copies will be deleted when exiting this script. If you need to revise them for error check, please do so NOW before proceeding. If you don't need to check these files, it is OK to delete them"
+
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		echo
+		echo -en "Cleaning up the control volume copies..."
+		# Deleting the folders "control_vols" for all subjects
+		rm -rf ${asl_output_folder_path}/*/control_vols
+
+		break
+		;;
+	*)
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+# Removing temporary folders and files created
+rm -r ${temp_folder} 2> /dev/null
+
+# Removing all PPSS log files after user input
+rm -r $PPSS_DIR/*

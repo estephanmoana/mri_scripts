@@ -1,0 +1,404 @@
+#! /bin/bash
+
+# This script will move the prestats folders within each functional run folder for each subjects into to the "analysis/1st_level" folder for further processing
+
+# Sourcing of functions library files #
+. functionslibr_FSL
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING FMRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+
+function retrieve_funcruns {
+# First we will check if the "analysis" and "analysis/1st_level" folders were created already
+
+# Checking if the "analysis" folder exists
+echo
+echo -e "Checking if the folder for analysis was created\n"
+cd ${MEDIA}/${EXPERIMENT}
+foldercheck=analysis
+checkfoldexist2
+sleep 3
+
+# Checking if the "1st_level" folder exists
+echo
+echo -e "Checking if the folder \"1st_level\" was created\n"
+cd ${MEDIA}/${EXPERIMENT}
+foldercheck=analysis/1st_level
+checkfoldexist2
+sleep 3
+
+# Creating a text file to hold the information entered within the "/tmp" folder - in case of any error in the script there will not be any temporary "trash" files
+cd /tmp
+echo -e "\t ** THIS FILE HOLDS THE INFORMATION FOR 1ST LEVEL FOLDERS MOVE **\n" > /tmp/variables_holding_file_temp.txt
+echo -e "\tCreated in `date +"%Y%b%d, %H:%M %p"`\n\n" >> /tmp/variables_holding_file_temp.txt
+
+# This is to inform the user about the ongoing process
+clear
+echo -e "\tThis will collect the information for each subject first\n"
+echo -e "\tThere is no \"batch processing\" option where all folders will be processed at once, as you need to be sure that all entered functional runs do have a \"feat\" folder within them\n"
+echo -e "\tAfter all information is retrieved, all folders entered will be copied to the \"analysis/1st_level\" folder\n"
+echo -e "\tAfter the copying process is finished, you will be given the option to delete the original \"feat\" folders within the functional run folders\n"
+
+# Just to warn the user about subjects that have no feat folder in any of the functional run folders
+echo
+echo -e "Please note that if a subject has no \"feat\" folders in one or more of the functional run folders, you should go back to the main menu by pressing \"control+c\" and exclude this subject for processing\n"
+echo -en "This program always assume that if a subject was entered, he/she will have data - so you must check this before hand "
+sleep 3
+echo
+
+# Here we will collect which functional runs will have their 1st level feat folder copied
+
+# Creating a variable to number each subject - this has to stay out of the "for SUBJ in ${SUBJLIST}" loop so it can be processed correctly
+subj_number=1
+
+for SUBJ in ${SUBJLIST}
+do
+		echo
+		FUNCRUNLIST=`ls -d1 ${FULLPATH}/${SUBJ}/func/frun*|sed 's!'${FULLPATH}/${SUBJ}/func/'!!'`
+
+	while [ 1 ]
+	do
+		echo
+		echo -e "\tFunctional runs for ${SUBJ}: \n\n\t`echo ${FUNCRUNLIST}`\n"
+		echo -e "Checking if a \"feat\" folder for each functional run exists\n"
+		cd ${FULLPATH}/${SUBJ}/func
+		for frun in ${FUNCRUNLIST}
+		do
+			foldercheck=${frun}/*.feat
+			if [ -d ${foldercheck} ] && [ -n "${foldercheck}" ]
+			then
+				echo
+				echo -e "\tThere is a \"feat\" folder within ${frun}\n"
+				unset foldercheck
+			else
+				echo
+				echo -e "\tThere is NOT a \"feat\" folder within ${frun} - ### PLEASE CHECK DATA ###\n"
+				unset foldercheck
+			fi
+		done
+
+		# Asking for user input to continue or to correct the entered functional run folders
+		echo
+		echo -e "If all functional run folders above have their respective \"feat\" folder, please press \"y\" to continue\n"
+		echo -e "Otherwise, choose \"n\" to correct the entered functional run folders OR \"s\" to skip this subject from processing\n"
+		echo -en "\tPlease choose \"y\" or \"n\" or \"s\" "
+		read conf2
+
+		case ${conf2} in
+		y | Y)
+			break ;;
+		n | N)
+			echo -e "\n"
+			echo -en "Please correct functional runs entered "
+			sleep 1
+
+			clear
+			FUNCRUNLIST=`ls -d1 ${FULLPATH}/${SUBJ}/func/frun*|sed 's!'${FULLPATH}/${SUBJ}/func/'!!'`
+			echo -e "\tFunctional runs for ${SUBJ}: \n\n\t`echo ${FUNCRUNLIST}`\n\n"
+			echo -en "Enter functional runs for ${SUBJ} to have their 1st level folders to be copied (if more than one, separate with spaces): "
+			read FRUNLIST
+			echo -e "\nFunctional runs entered: ${FRUNLIST}"
+			FUNCRUNLIST="${FRUNLIST}" ;;
+		s | S)
+			echo -e "\n"
+			echo -en "Skipping this subject from processing "
+
+			# This parameter substitution will remove the skipped subject from the variable SUBJLIST_local created earlier
+			SUBJLIST_local=${SUBJLIST_local/$SUBJ/}
+
+			# Gathering the subjects that were skipped to a variable to later present it to the user
+			subj_not_processed="${subj_not_processed} ${SUBJ}"
+
+			sleep 2
+			break ;;
+		*)
+		echo
+		echo -en "Invalid option - please choose \"y\", \"n\" or \"s\" "
+		sleep 2 ;;
+		esac
+	done
+
+	# After checking the functional runs entered, this will collect the info for variables for each subject
+	cd /tmp
+
+	# This is to add trailing zeros to this number, so instead of "2" you have "002" for example
+	subj_number=`printf "%03d" ${subj_number}`
+
+	echo -e "Information entered for ${SUBJ}\n" >> /tmp/variables_holding_file_temp.txt
+	echo -e "Subject_ID_${subj_number}=${SUBJ}\n" >> /tmp/variables_holding_file_temp.txt
+	echo -e "Functional_runlist_${subj_number}=`echo ${FUNCRUNLIST}`" >> /tmp/variables_holding_file_temp.txt
+	echo >> /tmp/variables_holding_file_temp.txt
+
+	# Adding a unit to the variable subj_number for the next subject to be processed by the loop above
+	# Note the use of "10#" - this is because numbers like 008 or 009 are interpreted as octal by bash during arithmetic operations. So by using "10#" you tell bash that these number are base 10
+	subj_number=$[10#${subj_number}+1]
+	clear
+done
+}
+
+function copy_funcruns {
+# Retrieving information for all subjects from text file "/tmp/variables_holding_file_temp.txt" created in the function "retrieve_funcruns"
+
+# This has to stay out of the "for SUBJ in ${SUBJLIST}" loop so it can be processed correctly
+subj_number02=1
+
+# Creating a file to hold information on possible errors during the copy process
+# This wil create an unique ID to name the log file
+file_id=`echo $RANDOM`
+touch ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+echo -e "THIS IS A LOG FILE FOR THE COPYING PROCESS OF PRESTATS FEAT FOLDERS FOR SUBJECTS \"${SUBJLIST}\"\n" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+echo -e "File created in `date +%Y%b%d_%H:%M`\n" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+
+# Giving the user the option of saving the feat folders in a different location
+echo
+echo -e "The FEAT folders will be moved to the analysis/1stlevel folder as a default"
+echo -e "The full path is this: ${FULLPATH}/analysis/1st_level\n"
+
+echo -en "Do you wish to copy the FEAT folders to a different location?(y/n) "
+read move_diff_loc
+
+if [ ${move_diff_loc} = y ]
+then
+	while [ 1 ]
+	do
+		echo
+		echo -en "Please enter the FULL path to the desired location and press enter: "
+		read copy_location
+
+		if [ -d ${copy_location} ]
+		then
+			echo
+			echo -e "The location entered is a valid folder"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+			break
+		else
+			echo
+			echo -e "The location entered it is NOT a valid folder"
+			echo -en "Press any key to enter a valid location "
+			read -n1 anykey
+		fi
+	done
+else
+	echo -e "Keeping the location as is: ${FULLPATH}/analysis/1st_level\n"
+	copy_location="${FULLPATH}/analysis/1st_level"
+fi
+
+# Warning the user about the log file_id
+echo
+echo -e "\tA log file about the copying process will be created and will contain any errors that may occur during the process\n"
+echo -e "\tPlease be sure to check this log file before you do the postprocessing of these files\n"
+echo -e "\tThe log file is located here: \"${FULLPATH}/analysis/\", and its name is \"log_prestats-feat_copy_${file_id}.txt\"\n"
+read -n1 -p "Press any key to continue " anykey
+
+for SUBJ in ${SUBJLIST}
+do
+	echo -e "\n"
+	echo -e "Processing \"feat\" folders for subject \"${SUBJ}\"\n" | tee -a ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+	cd /tmp
+	echo -e "\tIf there are any errors during the copy process for subject \"${SUBJ}\", they will be described below\n" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+
+	# This is to add trailing zeros to this number, so instead of "2" you have "002" for example
+	subj_number02=`printf "%03d" ${subj_number02}`
+
+	# Has to use double quotes for sed to expand the variables within it
+	subj=`grep Subject_ID_${subj_number02} /tmp/variables_holding_file_temp.txt|sed "s/Subject_ID_${subj_number02}=//"`
+	funcrunlist=`grep Functional_runlist_${subj_number02} /tmp/variables_holding_file_temp.txt|sed "s/Functional_runlist_${subj_number02}=//"`
+
+	# This is to check if the "funcrunlist" created for the subject is not empty
+	if [ -n "${funcrunlist}" ]
+		then
+			for FUNCRUN in ${funcrunlist}
+			do
+				# This will copy the feat folder to the "analysis/1st_level" folder
+				echo
+				echo -en "\tCopying \"feat\" folders from within the folder \"${FUNCRUN}\" to the destination folder "
+
+				# Adding a few lines to the log file
+				echo -e "\tCopy command issued at: `date +%Y%b%d_%H:%M:%S`" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+				echo -e "\tThe copy command was issued as described below" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+				echo -e "\t\"cp -R ${FULLPATH}/${subj}/func/${FUNCRUN}/*.feat ${copy_location}\"" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+				echo -e "\tIf there are any errors during copy of run \"${FUNCRUN}\", they are reported below this line. Otherwise, it will be blank:\n" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+
+				# This is the actual "copy" command - any errors will be redirected to the log file
+				cp -R ${FULLPATH}/${subj}/func/${FUNCRUN}/*.feat ${copy_location} 2>> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+
+				echo
+				echo -en "\tCopied \"${subj}_${FUNCRUN}.feat\" to this folder: ${copy_location} "
+
+				# Just to add white space in the log file
+				echo -e "\n" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+
+				cd /tmp
+				echo
+				sleep 1
+			done
+
+			echo
+			echo -e "All \"feat\" folders for ${subj} copied to \"analysis/1st_level\" folder\n" | tee -a ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+
+			# Just to add white space in the log file
+			echo -e "\n" >> ${FULLPATH}/analysis/log_prestats-feat_copy_${file_id}.txt
+			sleep 5
+		else
+			echo
+			echo -e "\tThere is NOT functional run folders entered for this subject \"${SUBJ}\" - PLEASE CHECK DATA\n"
+			read -n1 -p "Press any key to continue " anykey
+		fi
+
+	# Adding a unit to the variable subj_number for the next subject to be processed by the loop above
+	# Note the use of "10#" - this is because numbers like 008 or 009 are interpreted as octal by bash during arithmetic operations. So by using "10#" you tell bash that these number are base 10
+	subj_number02=$[10#${subj_number02}+1]
+done
+}
+
+function delete_funcruns {
+# This will ask the user if the "feat" folders inside the functional run folders should be erased or not
+echo -en "\tPlease choose if you would like to remove the \"feat\" folders within the functional run folder (yes/no) "
+read yesno
+
+while [ 1 ]
+do
+	case ${yesno} in
+	Yes | yes)
+		# Retrieving information from text file created above - this has to stay out of the "for SUBJ in ${SUBJLIST}" loop so it can be processed correctly
+		subj_number03=1
+
+		for SUBJ in ${SUBJLIST}
+		do
+			echo
+			echo -e "Removing \"feat\" folders from functional run folders of subject \"${SUBJ}\"\n"
+			subj_number03=`printf "%03d" ${subj_number03}`
+			cd /tmp
+
+			# Has to use double quotes for sed to expand the variables within it
+			subj=`grep Subject_ID_${subj_number03} /tmp/variables_holding_file_temp.txt|sed "s/Subject_ID_${subj_number03}=//"`
+
+			funcrunlist=`grep Functional_runlist_${subj_number03} /tmp/variables_holding_file_temp.txt|sed "s/Functional_runlist_${subj_number03}=//"`
+
+			# This is to check if the "funcrunlist" created for the subject is not empty
+			if [ -n "${funcrunlist}" ]
+				then
+					for FUNCRUN in ${funcrunlist}
+					do
+						# Going to the "/tmp" folder as a safeguard to not delete anything if the script has an error
+						cd /tmp
+
+						# This will remove the feat folder from the functional run folder
+						echo
+						echo -en "\tProcessing folder \"${FUNCRUN}\" "
+						rm -rf ${FULLPATH}/${subj}/func/${FUNCRUN}/${subj}_${FUNCRUN}*.feat/
+
+						echo
+						echo -e "\n\tRemoved \"${subj}_${FUNCRUN}.feat\""
+						cd /tmp
+					done
+
+					echo
+					echo -e "All \"feat\" folders for ${subj} removed from the functional run folders\n"
+					sleep 2
+				else
+					echo
+					echo -e "\tThere is NOT functional run folders entered for this subject \"${SUBJ}\" - PLEASE CHECK DATA\n"
+					read -n1 -p "Press any key to continue " anykey
+				fi
+
+			# Adding a unit to the variable subj_number for the next subject to be processed by the loop above
+			# Note the use of "10#" - this is because numbers like 008 or 009 are interpreted as octal by bash during arithmetic operations. So by using "10#" you tell bash that these number are base 10
+			subj_number03=$[10#${subj_number03}+1]
+		done
+		echo -e "All feat folders were removed from the functional run folders\n"
+		break ;;
+	No | no)
+		echo
+		echo -e "No feat folders were removed from the functional run folders\n"
+		break ;;
+	*)
+		clear
+		echo -e "No valid option chosen - please enter \"yes\" or \"no\"\n" ;;
+	esac
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+while [ 1 ]
+do
+	clear
+	echo -e "\tHere you can batch copy the feat folder for individual functional runs to the \"analysis/1st_level\" folder\n"
+	echo -e "\tand/or you can delete those folders from within the functional run folders if the feat folders were already moved\n"
+	echo -e "\tHaving feat folders within the \"analysis/1st_level\" folder is a MANDATORY REQUIREMENT before proceeding with the poststats processing or higher-level analysis\n"
+	echo -e "\tYou must have done the prestats processing for the subjects entered, as well as have created the \"analysis\" folder and its subfolders (including \"1st_level\")\n"
+	echo -en "\tChoose one option below\n\n"
+
+	echo -e "\t1. Copy \"feat\" folders to the \"analysis/1st_level\" folder and, optionally, delete the originals\n"
+	echo -e "\t2. Only delete the original \"feat\" folders from within the functional run folders\n"
+	echo -e "\t0. Go back to main menu\n"
+	echo -en "Enter option here and press enter: "
+	read optionmmenu
+
+	case $optionmmenu in
+	1)
+		# Calling the function "retrieve_funcruns" to collect functional runs feat folders to be copied
+		retrieve_funcruns
+
+		# Calling the function "copy_funcruns" to copy selected functional runs feat folders to the "analysis/1st_level folder"
+		copy_funcruns
+
+		# Calling the function "delete_funcruns" to delete functional runs feat folders from each subject folder
+		delete_funcruns
+
+		echo -e "Finished processing for all subjects: \"${SUBJLIST}\"\n"
+		echo -en "Press any key to continue "
+		read -n1 anykey
+
+		# Removing the text file created
+		rm /tmp/*temp.txt
+
+		break ;;
+
+	2)
+		# Calling the function "retrieve_funcruns" to collect functional runs feat folders to be copied
+		retrieve_funcruns
+
+		# Calling the function "delete_funcruns" to delete functional runs feat folders from each subject folder
+		delete_funcruns
+
+		echo -e "Finished processing for all subjects: \"${SUBJLIST}\"\n"
+		echo -en "Press any key to continue "
+		read -n1 anykey
+
+		# Removing the text file created
+		rm /tmp/*temp.txt
+
+		break ;;
+	0)
+		echo
+		echo -e "\tFeat folders not copied or deleted\n"
+		echo -e "\tGoing back to the main menu\n"
+		sleep 3
+		exit ;;
+	*)
+		echo
+		echo -e "\tPlease choose one of the options above\n"
+		sleep 3
+		echo ;;
+	esac
+done

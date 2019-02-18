@@ -1,0 +1,528 @@
+#! /bin/bash
+
+# This script use a FSL tool called "fsl_anat" that provides a general pipeline for processing anatomical images
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function structural_fslanat {
+# This function will check if the subjects listed have the ANATOMICAL file with the contrast chosen by user, and if so add them to the PPSS processing file
+
+# Count how many valid files there are
+# Establishing the initial numbering
+count_subj=0
+count_valid_file=0
+
+for SUBJ in ${SUBJLIST}
+do
+	# Checking if this subject has a ANATOMICAL file with the contrast chosen by user
+	# First gathering the anatomical file for the subject
+	subj_anat_file_fullpath=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/*_${CONTRAST_PROCESS}*_orig.nii.gz`
+
+	# Checking if this a valid file
+	if [ -s "${subj_anat_file_fullpath}" ] # Checks if a file exists and it is not empty. MUST HAVE THE PARENTHESIS OTHERWISE THE TEST STILL GIVER "TRUE" EVEN IF THE VARIABLE IS EMPTY.
+	then
+		# Gathering the ANATOMICAL file name withou the full path
+		subj_anat_file_nameonly=`echo ${subj_anat_file_fullpath} | awk -F/ '{print $NF}'`
+
+		# Giving feedback to the user
+		echo
+		echo -e "Subject ID: ${SUBJ} - ANATOMICAL file: ${subj_anat_file_nameonly}"
+
+		# COMMAND FOR PPSS: Adding this subject's ANATOMICAL file to the PPSS processing file. Note the use of the option "-t" and the variable CONTRAST_PROCESS to tell fsl_anat which type of ANATOMICAL will be processed
+		# If the input image is not T1-weighted, fsl_anat demands that the flags "--nononlinreg" and "--nosubcortseg" NOT be used, since it is not possible to do non-linear registration with nono-T1 images
+		if [ X${CONTRAST_PROCESS} = XT1 ]
+		then
+			echo "fsl_anat -t ${CONTRAST_PROCESS} -i ${subj_anat_file_fullpath}" >> ${temp_folder}/${ppss_command_file}
+		else # In this case the image ins not T1, so it will make the call to fsl_anat with the flag
+			echo "fsl_anat -t ${CONTRAST_PROCESS} --nononlinreg --nosubcortseg -i ${subj_anat_file_fullpath}" >> ${temp_folder}/${ppss_command_file}
+		fi
+
+		# Adding a unit to the numbering variable
+		((count_valid_file++))
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: fsl_anat; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/LOGFILE_fslanat_${subj_anat_file_nameonly}.txt
+
+		echo -e "Command fsl_anat that provides a general pipeline for processing anatomical images" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/LOGFILE_fslanat_${subj_anat_file_nameonly}.txt
+
+		if [ X${CONTRAST_PROCESS} = XT1 ]
+		then
+			echo -e "\nfsl_anat -t ${CONTRAST_PROCESS} -i ${subj_anat_file_fullpath}" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/LOGFILE_fslanat_${subj_anat_file_nameonly}.txt
+		else # In this case the image ins not T1, so it will make the call to fsl_anat with the flag
+			echo -e "\nfsl_anat -t ${CONTRAST_PROCESS} --nononlinreg --nosubcortseg -i ${subj_anat_file_fullpath}" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/LOGFILE_fslanat_${subj_anat_file_nameonly}.txt
+		fi
+		###############################
+	else
+		# Giving feedback to the user
+		echo
+		echo -e "Subject \"${SUBJ}\" does not have a valid ANTOMICAL file for contrast \"${CONTRAST_PROCESS}\""
+		echo -e "This subject will not be processed"
+
+		echo
+		echo -en "Press any key to continue"
+		read -n1 anykey
+	fi
+
+	# Adding a unit to the numbering variable
+	((count_subj++))
+done
+
+# Giving final feedback to the user on the number of files valid and number of subjects
+echo
+echo -e "Please check the number of subjects listed and ANATOMICAL files below:"
+echo -e "${count_subj} = Number of subjects listed for processing"
+echo -e "${count_valid_file} = Number of valid ANATOMICAL files with contrast *** ${CONTRAST_PROCESS} ***"
+
+echo
+echo -e "The above numbers should be the same, if all subjects listed are to be processed now"
+echo -e "If this is not true, please check the reasons why before processing (press Ctrl + C to go back to the PROCESSING menu)"
+
+echo
+echo -en "If you want to continue processing, press any key "
+read -n1 anykey
+}
+
+function structural_brain_atrophy {
+# This function will estimate brain atrophy using SIENA/SIENAX
+
+# Asking the user to which tool will be used: SIENA or SIENAX
+echo
+echo -e "Do you want to run:"
+echo -e "1. SIENA (longitudinal 2-timepoint estimation)"
+echo -e "2. SIENAX (cross sectional single-timepoint estimation) ~12min per image"
+
+echo
+echo -en "Please enter your option here: "
+read tool_choosen
+
+# Checking the user option
+if [ -n "${tool_choosen}" ] && [ ${tool_choosen} = 1 ] # Checking if this variable is not empty and equal to "1"
+then
+	echo -e "\n"
+	echo -e "*** UNDER CONSTRUCTION ***"
+
+	echo
+	echo -en "Press any key to go back to the PROCESSING menu "
+	read -n1 any key
+
+	exit
+
+elif [ -n "${tool_choosen}" ] && [ ${tool_choosen} = 2 ] # Checking if this variable is not empty and equal to "2"
+then
+	while [ 1 ]
+	do
+		# Allowing the use to choose the options for SIENAX
+		echo -e "\n"
+		echo -e "Please choose from the options below:"
+		echo -e "\t1. Use reoriented ANATOMICAL (images reoriented to MNI; default is original image)"
+		echo -e "\t2. SIENAX: Debug (No deletion of intermediate files)"
+		echo -e "\t3. SIENAX: Regional volume estimation (peripheral GM and ventricular CSF)"
+		echo -e "\t4. SIENAX: BET options (enter custom options for brain extraction)"
+		echo -e "\t5. SIENAX: FAST options (enter custom options for brain segmentation)"
+
+		echo
+		echo -en "Please enter your option here (If more than one, separate by space): "
+		read options_sienax_chosen
+
+		# Making the options "options_sienax_chosen" variable to be listed in a numbered list for the user
+		if [ -n "${options_sienax_chosen}" ] # Checking if this variable is non-zero in length
+		then
+			# Establishing the initial numbering
+			count=1
+
+			# Collecting the metrics listed in the "metric_choose" variable into another variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+			var1_available=`for options_sienax_item in ${options_sienax_available}; do echo "${count}=${options_sienax_item}"; ((count++)); done` # variable with all the files in a numbered list
+			var2_list="${options_sienax_chosen}" # The numbers chosen by the user corresponding to the files to be used
+
+			# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+			numbered_list_display "${var1_available}" "${var2_list}"
+
+			# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+			options_sienax_chosen="${files_to_use}"
+
+			# Cleaning the contents of the variables below
+			unset files_to_use count
+
+			# Showing to the user the option entered prior to processing
+			echo -e "\n"
+			echo -e "These are the options entered for SIENAX processing:\n"
+
+			# Listing the options to be listed in a numbered list for the user
+			# Establishing tne initial numbering
+			count=1
+
+			for item in ${options_sienax_chosen}
+			do
+				echo "${count}) ${item}"
+
+				# Adding a unit to the numbering variable
+				((count++))
+			done
+
+			# Cleaning the contents of the numbering variable
+			unset count
+
+			echo
+			echo -en "Is this correct? (y/n) "
+			read yesno
+
+			if [ ${yesno} = y ] || [ ${yesno} = Y ]
+			then
+				##### Consolidating the options chosen by user into a variable #####
+				OPTIONS_SIENAX=${options_sienax_chosen}
+
+				# Going to the processing stage
+				break
+
+			elif [ ${yesno} = n ] || [ ${yesno} = N ]
+			then
+				echo -e "\n"
+				echo -en "Please correct the options to be used "
+
+				sleep 2
+
+				# Cleaning the contents of the variable below
+				unset options_sienax_chosen
+			fi
+
+		elif [ -z "${options_sienax_chosen}" ] # Checking if this variable is zero in length. In this case, it will use the default metric
+		then
+			echo
+			echo -e "*** No option was choosen ***"
+			echo -e "SIENAX will run with DEFAULT options\n"
+
+			echo -en "Press any key to continue "
+			read -n1 anykey
+
+			##### Consolidating the options chosen by user into a variable #####
+			OPTIONS_SIENAX=""
+		fi
+	done
+
+	# Establishing the options for SIENAX command line
+	# Checking if the user chose options or if the variable is empty
+	if [ -n "${OPTIONS_SIENAX}" ] # Checking if it is not empty
+	then
+		# Variable holding the SIENAX options for command line
+		command_options_sienax=""
+
+		for item in ${OPTIONS_SIENAX}
+		do
+			# Checking the item being processed to give the option required
+			if [ ${item} = reoriented_images ]
+			then
+				anat_orig_reoriented=stdMNI.nii.gz
+
+			elif [ ${item} = debug ]
+			then
+				command_options_sienax="${command_options_sienax} -d"
+
+			elif [ ${item} = regional_volume_estimation ]
+			then
+				command_options_sienax="${command_options_sienax} -r"
+
+			elif [ ${item} = bet_options ]
+			then
+				# Asking the user what BET options he wants to use
+				while [ 1 ]
+				do
+					echo
+					echo -en "Please enter the BET options to modify (see BET wiki for list of options): "
+					read bet_options_mod_user
+
+					echo -e "\n"
+					echo -e "You entered the following BET options: ${bet_options_mod_user}"
+
+					echo
+					echo -en "Is this correct? (y/n) "
+					read yesno
+
+					# Checking if the user accepts the info presented
+					if [ -n "${yesno}" ] && [ "${yesno}" = y ] || [ "${yesno}" = Y ] # Checking if this variable is not empty and it is equal to yes
+					then
+						# Accepting the BET options entered
+						command_options_sienax="${command_options_sienax} -B \"${bet_options_mod_user}\""
+
+						break
+
+					elif [ -n "${yesno}" ] && [ "${yesno}" = n ] || [ "${yesno}" = N ] # checking if this variable is not empty and it is equal to no
+					then
+						echo -e "\n"
+						echo -en "Please correct the options entered "
+
+						sleep 2
+					else
+						echo -e "\n"
+						echo -en "No response was detected. You must choose yes or no "
+
+						sleep 2
+					fi
+				done
+
+			elif [ ${item} = fast_options ]
+			then
+				# Asking the user what FAST options he wants to use
+				while [ 1 ]
+				do
+					echo
+					echo -en "Please enter the FAST options to modify (see FAST wiki for list of options): "
+					read fast_options_mod_user
+
+					echo -e "\n"
+					echo -e "You entered the following BET options: ${fast_options_mod_user}"
+
+					echo
+					echo -en "Is this correct? (y/n) "
+					read yesno
+
+					# Checking if the user accepts the info presented
+					if [ -n "${yesno}" ] && [ "${yesno}" = y ] || [ "${yesno}" = Y ] # checking if this variable is not empty and it is equal to yes
+					then
+						# Accepting the BET options entered
+						command_options_sienax="${command_options_sienax} -S \"${fast_options_mod_user}\""
+
+						break
+
+					elif [ -n "${yesno}" ] && [ "${yesno}" = n ] || [ "${yesno}" = N ] # Checking if this variable is not empty and it is equal to no
+					then
+						echo -e "\n"
+						echo -en "Please correct the options entered "
+
+						sleep 2
+					else
+						echo -e "\n"
+						echo -en "No response was detected. You must choose yes or no "
+
+						sleep 2
+					fi
+				done
+			fi
+		done
+
+	elif [ -z "${OPTIONS_SIENAX}" ]
+	then
+		# Variable with SIENAX options empty
+		command_options_sienax=""
+	fi
+
+	# Checking if this image is T2-weighted - SIENAX needs an specific option for that
+	if [ ${CONTRAST_PROCESS} = T2 ]
+	then
+		command_options_sienax="${command_options_sienax} -t2"
+	fi
+
+	# Count how many valid files there are
+	# Establishing the initial numbering
+	count_subj=0
+	count_valid_file=0
+
+	for SUBJ in ${SUBJLIST}
+	do
+		# Checking if this subject has a ANATOMICAL file with the contrast chosen by user
+		# First gathering the ANATOMICAL file for the subject
+		subj_anat_file_fullpath=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/*_${CONTRAST_PROCESS}*_${anat_orig_reoriented}`
+
+		# Checking if this a valid file
+		if [ -s "${subj_anat_file_fullpath}" ] # Checks if a file exists and it is not empty. MUST HAVE THE PARENTHESIS< OTHERWISE THE TEST STILL GIVER "TRUE" EVEN IF THE VARIABLE IS EMPTY.
+		then
+			# Gathering the ANATOMICAL file name withou the full path
+			subj_anat_file_nameonly=`echo ${subj_anat_file_fullpath} | awk -F/ '{print $NF}'`
+
+			# Giving feedback to the user
+			echo
+			echo -e "Subject ID: ${SUBJ} - ANATOMICAL file: ${subj_anat_file_nameonly}"
+
+			# COMMAND FOR PPSS: Adding this subject's ANATOMICAL file to the PPSS processing file
+			echo "sienax ${subj_anat_file_fullpath} ${command_options_sienax}" >> ${temp_folder}/${ppss_command_file}
+
+			# Adding a unit to the numbering variable
+			((count_valid_file++))
+
+			##### Creating a LOG file with the commands used for later QA if needed #####
+			echo "OS name and version: ${os_nameandversion}; Command: sienax; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/LOGFILE_sienax_${subj_anat_file_nameonly}.txt
+
+			echo -e "Command sienax to perform analysis of brain change, in particular, the estimation of atrophy using anatomical images" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/LOGFILE_sienax_${subj_anat_file_nameonly}.txt
+
+			echo -e "\nsienax ${subj_anat_file_fullpath} ${command_options_sienax}" >> ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/LOGFILE_sienax_${subj_anat_file_nameonly}.txt
+			###############################
+		else
+			# Giving feedback to the user
+			echo
+			echo -e "Subject \"${SUBJ}\" does not have a valid ANTOMICAL file for contrast \"${CONTRAST_PROCESS}\""
+			echo -e "This subject will not be processed"
+
+			echo
+			echo -en "Press any key to continue"
+			read -n1 anykey
+		fi
+
+		# Adding a unit to the numbering variable
+		((count_subj++))
+	done
+
+	# Giving final feedback to the user on the number of files valid and number of subjects
+	echo
+	echo -e "Please check the number of subjects listed and ANATOMICAL files below:"
+	echo -e "${count_subj} = Number of subjects listed for processing"
+	echo -e "${count_valid_file} = Number of valid ANATOMICAL files with contrast *** ${CONTRAST_PROCESS} ***"
+
+	echo
+	echo -e "The above numbers should be the same, if all subjects listed are to be processed now"
+	echo -e "If this is not true, please check the reasons why before processing (press Ctrl + C to go back to the PROCESSING menu)"
+
+	echo
+	echo -en "If you want to continue processing, press any key "
+	read -n1 anykey
+fi
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir
+ppss_command_file=subject_structural_processing
+
+struct_contrast_available="T1 T2 PD" # Contrasts for ANATOMICAL images available
+anat_folder=anat # The name of the folder holding the ANATOMICAL images
+anat_orig_reoriented=orig.nii.gz
+
+options_sienax_available="reoriented_images debug regional_volume_estimation bet_options fast_options"
+######################################################################
+
+# Script Main menu - Informing the user what this script does and asking for input
+clear
+
+# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+# MODIFY THIS SCRIPT TO DO EITHER FSL_ANAT OR SIENA/SIENAX PROCESSING
+
+# Giving feedback to the user
+echo -e "#####################################################################"
+echo -e "\tThis program will process ANATOMICAL images for structural analysis"
+echo -e "######################################################################"
+
+# Showing the subjects to be processed here to the user
+echo
+echo -e "ANATOMICAL files will be processed here for the following subjects:\n"
+
+# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+# Establishing the initial numbering
+count=1
+
+for subj in ${SUBJLIST}
+do
+	# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+	counter=`printf "%02d" ${count}`
+
+	echo "${counter}) ${subj}"
+
+	# Adding a unit to the numbering variable
+	((count++))
+done
+
+# Cleaning the contents of the numbering variable
+unset count
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+while [ 1 ]
+do
+	echo
+	echo -e "This program allows to: 1. Process ANATOMICAL images using \"fsl_anat\"; and 2. Do brain atrophy estimation using \"SIENA/SIENAX\"\n"
+
+	echo -e "Do you want to use:"
+	echo -e "\t1) \"fsl_anat\": ** ANATOMICAL images processing **"
+	echo -e "\t2) \"SIENA/SIENAX\": ** Estimation of brain atrophy **"
+	echo -e "\t0. Back to main menu\n"
+
+	echo -en "Please enter your option here: "
+	read main_option
+
+	case ${main_option} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+		sleep 2
+
+		exit
+		;;
+	1)
+		echo -e "\n"
+		echo -e "Starting ANATOMICAL processing pipeline using \"fsl_anat\""
+
+		# FUNCTION CALL: Calling function "anatomical_contrast" in "mainscrcall_funclib" to allow the user to choose the contrast in the anatomical images to be processed
+		anatomical_contrast
+
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.) preceeded by the script's function that calls it in parenthesis
+		log_file_scripts_used start "structural_analysis:ANATOMICAL images processing pipeline using the FSL tool \"fsl_anat\"" FSL "(structural_fslanat) fsl_anat"
+
+		# FUNCTION CALL: Calling function "structural_fslanat" to select which ANATOMICAL files will be processed
+		structural_fslanat
+
+		# Calling the function "parallel_processing_ppss" to run the command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+		# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+		parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+		break
+		;;
+	2)
+		echo -e "\n"
+		echo -e "Starting brain atrophy estimation using \"SIENA/SIENAX\""
+
+		# FUNCTION CALL: Calling function "anatomical_contrast" in "mainscrcall_funclib" to allow the user to choose the contrast in the anatomical images to be processed
+		anatomical_contrast
+
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.) preceeded by the script's function that calls it in parenthesis
+		log_file_scripts_used start "structural_analysis:Brain atrophy estimation using \"SIENA/SIENAX\"" FSL "(structural_brain_atrophy) SIENA/SIENAX"
+
+		# FUNCTION CALL: Calling function "structural_brain_atrophy" to assess brain atrophy using SIENA/SIENAX
+		structural_brain_atrophy
+
+		# Calling the function "parallel_processing_ppss" to run the command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+		# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+		parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+		break
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+# Removing temporary folders and files created
+rm -r ${temp_folder} 2> /dev/null

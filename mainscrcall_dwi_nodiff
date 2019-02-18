@@ -1,0 +1,415 @@
+#! /bin/bash
+
+# Creates a nodif brain mask for DWI processing #
+# Extracts skull from anatomical images by performing 2 bet commands using a fractional intensity threshold of 0.15 to allow a greater brain outline estimate so not to loose part of the cerebellum in the first pass and try to clean the optic nerve in the second pass
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function extract_nodif {
+# This function will extract a non-diffusion image from a diffusion-weighted data set
+
+# Warning the user that the script expects the DWI file to be named data_raw.nii.gz
+echo
+echo -e "*** Please note that this script expects you DWI file to be named exactly as \"${dwi_filename}\" ***"
+echo -e "If it does not find a file named like this, it will generate an error"
+echo -en "Press any key to continue "
+read -n1 anykey
+
+# Asking the user for the index # for the non-diffusion image for all subjects to be processed
+echo -e "\n"
+echo -e "*** In order to extract a non-diffusion image from within the DWI 4D datasets, it is needed to know its index number ***"
+echo -e "This can be determined by opening the DWI 4D image in FSLView and looking for the index # associated with the non-diffusion image (if more than one non-diffusion image, you can use the first one only)\n"
+
+echo -en "Please enter the index number for the non-diffusion image within the DWI 4D datasets for all subjects (usually 0): "
+read nodif_index
+
+# Loop to process all subjects
+for SUBJ in ${SUBJLIST}
+do
+	# First checking if there is any DWI file for this subject
+	DWI_files_list=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${dwi_filename}.nii.gz 2> /dev/null`
+
+	if [ -n "${DWI_files_list}" ]
+	then
+		for item in ${DWI_files_list}
+		do
+			# Storing each DWI file and its folder into a variable. Observe the use of a dot before the wildcard in the sed command - necessary for it to see the asterisk as a wild card - and also single quotes
+			DWI_file=`echo ${item} | awk -F/ '{print $NF}'`
+			DWI_directory=`echo ${item} | sed 's!'${dwi_mainfolder_path}/${SUBJ}/'!!' | sed 's!'/${DWI_file}'!!'`
+
+			# Presenting the file and directory to the user
+			echo -e "\n"
+			echo -en "Extracting non-diffusion image for subject ### ${SUBJ} ### "
+
+			###### MAIN COMMAND: Using the fslroi tool to extract the nodif image ######
+			fslroi ${item} ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/${dwi_nodif_outputfile} ${nodif_index} 1
+
+			##### Creating a LOG file with the commands used for later QA if needed #####
+			echo "OS name and version: ${os_nameandversion}; Command: fslroi; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/LOGFILE_extract-nodif-image_fslroi_${DWI_file}.txt
+
+			echo -e "Command \"fslroi\" to extract a no diffusion image from the DWI file" >> ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/LOGFILE_extract-nodif-image_fslroi_${DWI_file}.txt
+
+			echo -e "\nfslroi ${item} ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/${dwi_nodif_outputfile} ${nodif_index} 1" >> ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/LOGFILE_extract-nodif-image_fslroi_${DWI_file}.txt
+			#####################################
+
+			echo -e
+			echo -e "Finished processing file \"${DWI_file}\", from folder \"${DWI_directory}\""
+
+			#### Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in mainscrcall_funclib #####
+			subj_process="${subj_process} ${SUBJ}"
+		done
+	else
+		echo -e "\n"
+		echo -e "##### No diffusion-weighted files were found for subject \"$SUBJ\" #####"
+		echo -e "Skipping this subject for no-diffusion image extraction\n"
+
+		echo -en "Press any key to continue "
+		read -n1 anykey
+
+		##### Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in mainscrcall_funclib #####
+		subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+	fi
+done
+}
+
+function remove_skull_nodif {
+# This function will use BET to remove non-brain tissue from a nodif image
+
+# Loop to process all subjects
+for SUBJ in ${SUBJLIST}
+do
+	# Checking if there is a nodif image for this subject
+	nodif_files_list=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${dwi_nodif_outputfile}.nii.gz 2> /dev/null`
+
+	if [ -n "${nodif_files_list}" ]
+	then
+		for item in ${nodif_files_list}
+		do
+			# Storing each DWI file and its folder into a variable. Observe the use of a dot before the wildcard in the sed command - necessary for it to see the asterisk as a wild card - and also single quotes
+			nodif_file=`echo ${item} | awk -F/ '{print $NF}'`
+			nodif_directory=`echo ${item} | sed 's!'${dwi_mainfolder_path}/${SUBJ}/'!!' | sed 's!'/${nodif_file}'!!'`
+
+			# Presenting the file and directory to the user
+			echo -e "\n"
+			echo -en "Removing non-brain tissue from non-diffusion image of subject ### ${SUBJ} ### "
+
+			###### MAIN COMMAND: Using BET with a fractional thresholds of 0.15 - usually give great results for nodif images. ALSO NOTE THE "-M" OPTION, THAT WILL GENERATE A BINARY BRAIN MASK NAMED "nodif_brain_mask" ######
+			bet ${item} ${dwi_mainfolder_path}/${SUBJ}/${nodif_directory}/${dwi_nodif_outputfile}_brain -f 0.15 -g 0 -m
+
+			##### Creating a LOG file with the commands used for later QA if needed #####
+			echo "OS name and version: ${os_nameandversion}; Command: bet; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${dwi_mainfolder_path}/${SUBJ}/${nodif_directory}/LOGFILE_remove-non-brain-tissue-from-nodif_bet_${nodif_file}.txt
+
+			echo -e "Command \"bet\" to remove non-brain tissue from non-diffusion image" >> ${dwi_mainfolder_path}/${SUBJ}/${nodif_directory}/LOGFILE_remove-non-brain-tissue-from-nodif_bet_${nodif_file}.txt
+
+			echo -e "\nbet ${item} ${dwi_mainfolder_path}/${SUBJ}/${nodif_directory}/${dwi_nodif_outputfile}_brain -f 0.15 -g 0 -m" >> ${dwi_mainfolder_path}/${SUBJ}/${nodif_directory}/LOGFILE_remove-non-brain-tissue-from-nodif_bet_${nodif_file}.txt
+			#####################################
+
+			echo
+			echo -e "Finished processing file \"${nodif_file}\", from folder \"${nodif_directory}\""
+		done
+	else
+		echo -e "\n"
+		echo -e "##### No diffusion-weighted files were found for subject \"$SUBJ\" #####"
+		echo -e "Skipping this subject for no-diffusion image extraction\n"
+
+		echo -en "Press any key to continue "
+		read -n1 anykey
+	fi
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+dwi_mainfolder_path=${SUBJS_FOLDERS_PATH} # Where the DWI files are. Can be modified by the user in this script.
+dwi_subject_subfolder=DWI/DWI_* # To be used with "ls" command: The path to the subfolder within each subject's folder
+dwi_filename=data_DWI_stdMNI # The DWI file name for the file to be processed here
+dwi_nodif_outputfile=nodif # The output file name
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+clear
+
+# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+echo
+echo -e "This program will prepare a no-diffusion brain mask from your diffusion-weighted data"
+echo -e "This is needed for the both \"dtifit\" and \"bedpostx\" steps of DWI processing using FSL tools\n"
+
+##### GATHERING THE PATH TO THE ANALYSIS FOLDER #####
+# FUNCTION CALL: calls the function "analysis_mainfolder" in "mainscrcall_funclib" to allow the user to select the path to the subject's folders
+analysis_mainfolder DWI
+
+# Assigning the output variable from the function above to a local variable
+dwi_mainfolder_path=${ANALYSIS_MAINFOLDER_PATH}
+######################################################
+
+# MAIN MENU
+while [ 1 ]
+do
+	echo -e "\n"
+	echo -e "Full processing to obtain a no-diffusion brain mask needs 2 steps:"
+	echo -e "\t1. Extract a single non-diffusion image (B0) from the 4D diffusion-weighted data set"
+	echo -e "\t2. Remove non-brain tissue from the nodif image and generate a binary mask using BET"
+	echo -e "\t3. Steps 1 and 2 in sequence (RECOMMENDED)"
+	echo -e "\t0. Back to main menu\n"
+
+	echo -en "Please enter here which steps you want to perform (use \"all\" for both (RECOMMENDED), or enter one option only): "
+	read nodif_process_steps
+
+	case ${nodif_process_steps} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+
+		sleep 2
+
+		exit
+		;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dwi_nodif:Prepare a non-diffusion brain mask from diffusion weighted data" FSL "(extract_nodif) fslroi; (remove_skull_nodif) bet"
+
+		####### MAIN PATH TO SUBJECTS FOLDER CHECK ##############
+		# Checking if used the original path to DWI files or the user entered another one ("default_path" variable originates from function "DWI_mainfolder" in "mainscrcall_funclib")
+		if [ ${default_path} = yes ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used the default path for DWI data: ${dwi_mainfolder_path}"
+
+		elif [ ${default_path} = no ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used an alternative path for DWI data: ${dwi_mainfolder_path}"
+		fi
+		#########################################################
+
+		# Creating a log file. STEP 1.5 of 2 = midscript call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+		log_file_scripts_used midscript "Extract a single non-diffusion image (B0) from the 4D DWI dataset"
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "This script will extract a single no-diffusion image (B0) from the diffusion-weighted data for the subjects listed:\n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing tne initial subject numbering
+		count=1
+
+		for SUBJ in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo "${counter}) ${SUBJ}"
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the variable below
+		unset count counter
+
+		# FUNCTION CALL: calls the function "extract_nodif" to extract a nodif image from the DWI data
+		extract_nodif
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_processed" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_processed
+		################################################
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	2)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dwi_nodif:Prepare a non-diffusion brain mask from diffusion weighted data" FSL "(extract_nodif) fslroi; (remove_skull_nodif) bet"
+
+		####### MAIN PATH TO SUBJECTS FOLDER CHECK ##############
+		# Checking if used the original path to DWI files or the user entered another one ("default_path" variable originates from function "DWI_mainfolder" in "mainscrcall_funclib")
+		if [ ${default_path} = yes ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used the default path for DWI data: ${dwi_mainfolder_path}"
+
+		elif [ ${default_path} = no ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used an alternative path for DWI data: ${dwi_mainfolder_path}"
+		fi
+		#########################################################
+
+		# Creating a log file. STEP 1.5 of 2 = midscript call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+		log_file_scripts_used midscript "Remove non-brain tissue from from the nodif image and generate a binary mask using BET"
+
+		# Giving information to the user on what this script will do
+		echo -e "This script will remove non-brain tissue from the nodif image and also generate a binary brain mask for the subjects listed: \n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing tne initial subject numbering
+		count=1
+
+		for subj in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo "${counter}) ${subj}"
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the numbering variable
+		unset count counter
+
+		# Allowing the subject the opportunity to continue the process (instead of automatically processing all subjects without asking)
+		echo
+		echo -en "If you wish to proceed this for all subjects above, press any key (OR ctrl+c to abort) "
+		read -n1 anykey
+
+		# FUNCTION CALL: Calls the function "subjects_processed" to list all subjects processed and those not processed
+		remove_skull_nodif
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_processed" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_processed
+		################################################
+
+		echo
+		echo -e "*** Remember that you MUST check the results of non-brain tissue removal before proceeding ***"
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	3)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dwi_nodif:Prepare a non-diffusion brain mask from diffusion weighted data" FSL "(extract_nodif) fslroi; (remove_skull_nodif) bet"
+
+		####### MAIN PATH TO SUBJECTS FOLDER CHECK ##############
+		# Checking if used the original path to DWI files or the user entered another one ("default_path" variable originates from function "DWI_mainfolder" in "mainscrcall_funclib")
+		if [ ${default_path} = yes ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used the default path for DWI data: ${dwi_mainfolder_path}"
+
+		elif [ ${default_path} = no ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used an alternative path for DWI data: ${dwi_mainfolder_path}"
+		fi
+		#########################################################
+
+		# Creating a log file. STEP 1.5 of 2 = midscript call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+		log_file_scripts_used midscript "Extract a single non-diffusion image (B0) from the 4D DWI dataset; Remove non-brain tissue from from the nodif image and generate a binary mask using BET"
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "This script will do both steps mentioned above for the subjects listed:\n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing tne initial subject numbering
+		count=1
+
+		for subj in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo "${counter}) ${subj}"
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the variable below
+		unset count counter
+
+		# Calling hte functions for processing
+		echo
+		echo -e "##########################################################################################"
+		echo -en "*** Extracting non-diffusion images for all subjects *** "
+
+		# FUNCTION CALL: calls the function "extract_nodif" to extract a nodif image from the DWI data
+		extract_nodif
+
+		echo -e "\n"
+		echo -e "*** Removing non-brain tissue from non-diffusion image and generating binary brain mask ***"
+
+		# FUNCTION CALL: Calls the function "remove_skull_nodif" to extract non-brain tissue from a nodif image
+		remove_skull_nodif
+
+		echo -e "##########################################################################################"
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_listed2process" in "mainscrcall_funclib" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_listed2process
+		################################################
+
+		echo
+		echo -e "*** Remember that you MUST check the results of non-brain tissue removal before proceeding ***"
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+		break
+		;;
+
+	*)
+		echo -e "No valid option chosen\n"
+
+		echo -en "Please re-enter an option "
+
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"

@@ -1,0 +1,507 @@
+#! /bin/bash
+
+# Script with menu for fMRI analyzes using FSL#
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to main menu #### CANNOT use this as this script is running the "input_menu" script using the source command ####
+# trap "echo -en '\n\nGoing back to the INPUT menu '; sleep 2; MAIN_MENU_LOOP" SIGINT
+
+#Allowing tab completion
+#export BASH_COMPLETION=/Users/Shared/fmri_software/bash_completion
+#. bash_completion
+
+# # Makes this script to read .bashrc startup file
+# BASH_ENV="~/.bash_profile"
+
+# Instructions for the USER
+clear
+
+echo
+echo -e "\t\t\tMRI data analysis (BIDS v1.0.1)\n\n"
+echo -e "\t\t\t** Instructions **\n\n"
+echo -e "\tThe input menu will allow you to provide the necessary information"
+echo -e "\tfor this program to correctly proceed to the subsequent processing steps\n"
+
+echo -e "\tFirst step is to enter the information on where the data are to be stored"
+echo -e "\tand the subjects' data info (option \"a\")\n"
+
+echo -e "\tSecond step is to create the folders (option \"c\")\n"
+
+echo -e "\tPlease note that you can check the data entered using option \"b\""
+echo -e "\tand the folders created using option \"d\"\n\n"
+
+echo -e "\tLastly, you must have created templates using the FEAT GUI for the prestats and poststats processing steps, and their folders should be named in this format: \"prestats_standard_template\" for a prestats template example\n"
+
+echo -e "\tBe aware that the \"template\" in the folder name is mandatory for the correct functioning of the prestats and poststats programs. The template folders should also be located within your \"experiment\" folder\n"
+
+echo -en "\tPress any key to proceed to the INPUT menu "
+read -n1 anykey
+
+function INPUT_menu {
+clear
+
+echo -e "\t\t\tMRI data analysis (BIDS v1.0.1)\n"
+echo -e "\t\t** INPUT MENU **\n\n"
+echo -e "\ta. Enter storage and subjects info\n"
+echo -e "\t\ta1. Enter/change storage info only\n"
+echo -e "\t\ta2. Enter/change subjects data only\n"
+echo -e "\tb. Check storage and subjects info entered\n"
+echo -e "\t\tb1. Export storage and subjects data info entered to a text file\n"
+echo -e "\tc. Create folders for data\n"
+echo -e "\td. Check folders created\n"
+echo -e "\t0. Exit this program\n"
+echo -e "\t1. After entering data, proceed to processing steps\n"
+echo -en "\t\tEnter your option here and press enter: "
+read optionmmenu
+echo
+}
+
+function PROCESSING_menu {
+clear
+
+echo -e "\t\t\tfMRI data analysis using FSL\n"
+echo -e "\t\t\t*** PROCESSING MENU ***\n"
+echo -e "\t\t** 1. Pre-processing Steps **\n"
+echo -e "\t1a. Uncompress zipped files/Move DICOM files to data directory"
+echo -e "\t1b. Convert DICOM files to Nifti"
+echo -e "\t1c. Check/Convert images orientation to MNI template"
+echo -e "\t1d. Outliers detection due to motion for BOLD time-series (functional/resting)"
+echo -e "\t1e. Collect images header information and descriptive statistics"
+echo -e "\t1f. Calculate head motion"
+echo -e "\t1g. Use BET to strip skull from structural image"
+echo -e "\t1h. Process FIELD MAP files to use it for EPI distortion correction of STRUCTURAL/FUNCTIONAL images"
+
+echo
+echo -e "\t\t** 2. Processing Steps **\n"
+
+echo -e "\t\t** STRUCTURAL **\n"
+
+echo -e "\t* ANATOMICAL *"
+echo -e "\t2a01. Anatomical images processing (\"fsl_anat\", \"SIENA/SIENAX\")"
+echo -e "\t2a02. FREESURFER: Import DICOM files and create subject data directory for freesurfer files"
+echo -e "\t2a03. FREESURFER: Run recon-all command for cortical reconstruction"
+echo -e "\t2a04. FREESURFER: Register FEAT subject level output to the Freesurfer-processed anatomical image"
+
+echo
+echo -e "\t* DIFFUSION-WEIGHTED *"
+echo -e "\t2a05. DWI: Create a no-diffusion (nodif) brain mask for DWI data processing"
+echo -e "\t2a06. DWI: Eddy current (and head motion) correction (~1/2 min per volume)"
+echo -e "\t2a07. DWI: Rotate bvecs to adjust for eddy current correction using \"fdt_rotate_bvecs\" script"
+echo -e "\t2a08. DWI: Distortion correction of DWI files using FIELD MAP files"
+echo -e "\t2a09. DWI: Fitting of diffusion tensors using dtifit (~1 min per subject)"
+echo -e "\t2a10. DWI: Fitting of probabilistic diffusion model using bedpostx (~15 hrs per subject)"
+echo -e "\t2a11. DWI: Registration using FDT GUI steps (~15 min per subject)"
+echo -e "\t2a12. DWI: Probalistic tractography using the FSL tool \"probtrackx2\""
+echo
+echo -e "\t2a13. DTI-TK: Preprocessing FSL's DTI volumes into DTI-TK format"
+echo -e "\t2a14. DTI-TK: Registration and spatial normalization"
+echo -e "\t2a15. DTI-TK: Customization of \"tbss_3_postreg\" steps for TBSS analysis"
+
+echo
+echo -e "\t\t** FUNCTIONAL **\n"
+
+echo -e "\t* STIMULUS-EVOKED BOLD *"
+echo -e "\tRun FEAT analysis for:"
+echo -e "\t2c01. 1st level full analysis (prestats+poststats+Registration altogether)"
+echo -e "\t2c02. 2nd level analysis"
+
+echo
+echo -e "\t* ARTERIAL SPIN LABELLING (ASL) *"
+echo -e "\t2c03. Motion correction using MCFLIRT"
+echo -e "\t2c04. Tag-control subtraction"
+echo -e "\t2c05. Mean image from control volumes (calibration purpose, for NO BACKGROUND SUPRESSION ASL only)"
+echo -e "\t2c06. Cerebral blood perfusion estimation using \"oxford_asl\"(~15-30 min per ASL timeseries)"
+
+echo
+echo -e "\t\t** 3. Post-processing Steps **\n"
+echo -e "\t3a. Collect cluster location for higher-level analysis results"
+echo -e "\t3b. Interrogate ROIs using FEATQUERY"
+
+echo
+echo -e "\t\t** Other options **\n"
+echo -e "\t10. Go back to INPUT menu"
+echo -e "\t0. Exit this program\n"
+echo -en "\t\tEnter your option here and press enter: "
+read optionmmenu02
+}
+
+function contmmenu {
+# Continue with program or exit #
+echo
+echo -en "\n\t\tAre you sure you want to exit? (y/n) "
+if read -t 60 -n 1 -p "" line
+then
+	case $line in
+	Y | y)
+		echo
+		clear
+		exit ;;
+	N | n)
+		echo ;;
+	esac
+else
+	echo -e "\n"
+	echo -e "No timely response, back to main menu \n"
+	sleep 3
+fi
+}
+
+function MAIN_MENU_LOOP {
+# Function for the main menu loop
+while [ 1 ]
+do
+	# 1 - Main menu #
+	while [ 1 ]
+	do
+		cd /tmp
+		clear
+
+		# Calling the above function "Input_menu"
+		INPUT_menu
+
+		case $optionmmenu in
+		0)
+			# Function to give option to the user to exit the program
+			contmmenu ;;
+		1)
+			# Checking if all variables have a value before going to the processing steps menu
+
+			# Defining a variable to register if an error was found or not
+			error_check=0
+
+			emptvar=${MEDIA}
+			var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+			checkemptvar2
+
+			emptvar=${EXPERIMENT}
+			var_checked="THE EXPERIMENT NAME"
+			checkemptvar2
+
+			emptvar="${SUBJLIST}"
+			var_checked="THE SUBJECT(S) TO BE PROCESSED"
+			checkemptvar2
+
+			# Using the variable "error_check" (from function checkemptvar2) to assess if there was an error or not
+
+			if [ $error_check = 0 ]
+			then
+				break
+				clear
+			else
+				echo
+			fi ;;
+		a)
+			# Calling the script "input_menu" for processing
+			mainscrcall_input_menu
+
+			# Retrieving the main variables contents from the text file created in the "input_menu" script
+			# Putting the file path into a variable
+			file_variable_content=/tmp/input_menu_variables/variable_contents.txt
+
+			if [ -f ${file_variable_content} ] # Checking if this file exists
+			then
+				EXPERIMENT=`grep EXPERIMENT_var ${file_variable_content} | sed -e 's/EXPERIMENT_var=//; s/"//; s/"//'`
+				MEDIA=`grep MEDIA_var ${file_variable_content} | sed -e 's/MEDIA_var=//; s/"//; s/"//'`
+				FULLPATH=`grep FULLPATH_var ${file_variable_content} | sed -e 's/FULLPATH_var=//; s/"//; s/"//'`
+				SUBJS_FOLDERS_PATH=`grep SUBJS_FOLDERS_PATH_var ${file_variable_content} | sed -e 's/SUBJS_FOLDERS_PATH_var=//; s/"//; s/"//'`
+				SUBJLIST=`grep SUBJLIST_var ${file_variable_content} | sed -e 's/SUBJLIST_var=//; s/"//; s/"//'`
+				SUBJECTS_DIR=`grep SUBJECTS_DIR_var ${file_variable_content} | sed -e 's/SUBJECTS_DIR_var=//; s/"//; s/"//'`
+			fi
+
+			# Exports the created variables and go to INPUT menu
+			export EXPERIMENT MEDIA FULLPATH SUBJS_FOLDERS_PATH SUBJLIST SUBJECTS_DIR
+
+			# Removing the folder created including the file above
+			rm -R /tmp/input_menu_variables
+			;;
+		a1)
+			# Getting the user option into a variable to be used by the script "input_menu". Note the second parameter to flag that this will only need to change the storage folder (Needed for the "input_menu" script select the appropriate function usage)
+			user_input="storage_fold only_storage"
+			export user_input
+
+			# Calling the script "input_menu" for processing
+			mainscrcall_input_menu
+
+			# Retrieving the main variables contents from the text file created in the "input_menu" script
+			# Putting the file path into a variable
+			file_variable_content=/tmp/input_menu_variables/variable_contents.txt
+
+			if [ -f ${file_variable_content} ] # Checking if this file exists
+			then
+				EXPERIMENT=`grep EXPERIMENT_var ${file_variable_content} | sed -e 's/EXPERIMENT_var=//; s/"//; s/"//'`
+				MEDIA=`grep MEDIA_var ${file_variable_content} | sed -e 's/MEDIA_var=//; s/"//; s/"//'`
+				FULLPATH=`grep FULLPATH_var ${file_variable_content} | sed -e 's/FULLPATH_var=//; s/"//; s/"//'`
+				SUBJS_FOLDERS_PATH=`grep SUBJS_FOLDERS_PATH_var ${file_variable_content} | sed -e 's/SUBJS_FOLDERS_PATH_var=//; s/"//; s/"//'`
+				SUBJLIST=`grep SUBJLIST_var ${file_variable_content} | sed -e 's/SUBJLIST_var=//; s/"//; s/"//'`
+				SUBJECTS_DIR=`grep SUBJECTS_DIR_var ${file_variable_content} | sed -e 's/SUBJECTS_DIR_var=//; s/"//; s/"//'`
+			fi
+
+			# Exports the created variables and go to INPUT menu
+			export EXPERIMENT MEDIA FULLPATH SUBJS_FOLDERS_PATH SUBJLIST SUBJECTS_DIR
+
+			# Removing the folder created including the file above
+			rm -R /tmp/input_menu_variables
+
+			# Removing the content of variable "user_input"
+			unset user_input
+			;;
+		a2)
+			# Getting the user option into a variable to be used by the script "input_menu"
+			user_input="subjs_list only_subjs"
+			export user_input
+
+			# Calling the script "input_menu" for processing
+			mainscrcall_input_menu
+
+			# Retrieving the main variables contents from the text file created in the "input_menu" script
+			# Putting the file path into a variable
+			file_variable_content=/tmp/input_menu_variables/variable_contents.txt
+
+			if [ -f ${file_variable_content} ] # Checking if this file exists
+			then
+				EXPERIMENT=`grep EXPERIMENT_var ${file_variable_content} | sed -e 's/EXPERIMENT_var=//; s/"//; s/"//'`
+				MEDIA=`grep MEDIA_var ${file_variable_content} | sed -e 's/MEDIA_var=//; s/"//; s/"//'`
+				FULLPATH=`grep FULLPATH_var ${file_variable_content} | sed -e 's/FULLPATH_var=//; s/"//; s/"//'`
+				SUBJS_FOLDERS_PATH=`grep SUBJS_FOLDERS_PATH_var ${file_variable_content} | sed -e 's/SUBJS_FOLDERS_PATH_var=//; s/"//; s/"//'`
+				SUBJLIST=`grep SUBJLIST_var ${file_variable_content} | sed -e 's/SUBJLIST_var=//; s/"//; s/"//'`
+				SUBJECTS_DIR=`grep SUBJECTS_DIR_var ${file_variable_content} | sed -e 's/SUBJECTS_DIR_var=//; s/"//; s/"//'`
+			fi
+
+			# Exports the created variables and go to INPUT menu
+			export EXPERIMENT MEDIA FULLPATH SUBJS_FOLDERS_PATH SUBJLIST SUBJECTS_DIR
+
+			# Removing the folder created including the file above
+			rm -R /tmp/input_menu_variables
+
+			# Removing the content of variable "user_input"
+			unset user_input
+			;;
+		b)
+			# Shows the data entered and ask for user confirmation
+			clear
+
+			echo
+			echo -e "Experiment name: ${EXPERIMENT}"			
+			echo -e "Storage to be used: ${MEDIA}\n"
+
+# 			echo -e "Path to subjects folders: ${SUBJS_FOLDERS_PATH}\n"
+
+			echo -e "Subjects entered:\n"
+
+			# Showing all subjects listed in the "SUBJLIST" variable in a numbered list
+			# Establishing tne initial subject numbering
+			subjnumber=1
+
+			for subj in ${SUBJLIST}
+			do
+				subjnumber=`printf "%02d" ${subjnumber}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+				echo "${subjnumber}) ${subj}"
+
+				# Adding a unit to the numbering variable. 	# Note the use of "10#" - this is because numbers like 008 or 009 are interpreted as octal by bash during arithmetic operations. So by using "10#" you tell bash that these number are base 10. Maybe not needed here since only using a single trailing zero
+				subjnumber=$[ 10#$subjnumber + 1 ]
+			done
+
+			# Cleaning the contents of the variable below
+			unset subjnumber
+
+			echo -e "\n"
+			echo -e "Fullpath for data: ${FULLPATH}\n"
+
+			echo -en "\t\tPress any key to go back to INPUT menu "
+			read -n 1 contchkvar ;;
+		b1)
+			# Getting the user option into a variable to be used by the script "input_menu"
+			user_input=exportvars
+			export user_input
+
+			# Calling the script "input_menu" for processing
+			mainscrcall_input_menu
+
+			# Removing the content of variable "user_input"
+			unset user_input
+			;;
+		c)
+			# Calling the script "createfolders"
+			mainscrcall_createfolders ;;
+		d)
+			# Getting the user option into a variable to be used by the script "input_menu"
+			user_input=checkfold
+			export user_input
+
+			# Calling the script "input_menu" for processing
+			mainscrcall_input_menu
+			;;
+		*)
+			echo -en "No valid option chosen "
+			sleep 2 ;;
+		esac
+	done
+
+	# Cleaning the screen
+	clear
+
+	# FUNCTION CALL: Calls the function "machine_local-network" in mainscrcall_funclib to check if the machine running the scripts is a local or a remote one (will change the way scripts using parallel processing behave)
+	machine_local-network
+
+	while [ 1 ]
+	do
+		# Going to the "tmp" folder just to be safe
+		cd /tmp
+
+		# Calling the above FUNCTION "Processing_menu"
+		PROCESSING_menu
+
+		case $optionmmenu02 in
+		0)
+			# Calling the FUNCTION below
+			contmmenu
+			;;
+		1a)
+			# Calling the SCRIPT below
+			mainscrcall_unzip_files
+			;;
+		1b)
+			# Calling the SCRIPT below
+			mainscrcall_dcm2nifti
+			;;
+		1c)
+			# Calling the SCRIPT below
+			mainscrcall_swaporient
+			;;
+		1d)
+			# Calling the SCRIPT below
+			mainscrcall_motion_outliers
+			;;
+		1e)
+			# Calling the SCRIPT below
+			mainscrcall_header_info_QA
+			;;
+		1f)
+			# Calling the SCRIPT below
+			mainscrcall_head_motion_mean_calc
+			;;
+		1g)
+			# Calling the SCRIPT below
+			mainscrcall_bet_skullextract
+			;;
+		1h)
+			# Calling the SCRIPT below
+			mainscrcall_fieldmap
+			;;
+		2a01)
+			# Calling the SCRIPT below
+			mainscrcall_structural_analysis
+			;;
+		2a02)
+			# Calling the SCRIPT below
+			mainscrcall_FS_subjfolders
+			;;
+		2a03)
+			# Calling the SCRIPT below
+			mainscrcall_FS_cort_recon
+			;;
+		2a04)
+			# Calling the SCRIPT below
+			mainscrcall_FS_reg_FEAT2FS
+			;;
+		2a05)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_nodiff
+			;;
+		2a06)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_eddycurrentcorr
+			;;
+		2a07)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_rotate_bvecs
+			;;
+		2a08)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_unwarp
+			;;
+		2a09)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_dtifit
+			;;
+		2a10)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_bedpostx
+			;;
+		2a11)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_registration
+			;;
+		2a12)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_tractography
+			;;
+		2a13)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_dtitk_preproc
+			;;
+		2a14)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_dtitk_reg-spatial-norm
+			;;
+		2a15)
+			# Calling the SCRIPT below
+			mainscrcall_dwi_dtitk_tbss-custom
+			;;
+		2c01)
+			# Calling the SCRIPT below
+			mainscrcall_FEAT1stlevel_analysis
+			;;
+		2c02)
+			# Calling the SCRIPT below
+			mainscrcall_FEAT2ndlevel_analysis
+			;;
+		2c03)
+			# Calling the SCRIPT below
+			mainscrcall_ASL_motioncorrection
+			;;
+		2c04)
+			# Calling the SCRIPT below
+			mainscrcall_ASL_tag-control-subtraction
+			;;
+		2c05)
+			# Calling the SCRIPT below
+			mainscrcall_ASL_controlvolsmean
+			;;
+		2c06)
+			# Calling the SCRIPT below
+			mainscrcall_ASL_CBFestimation
+			;;
+		3a)
+			# Calling the SCRIPT below
+			mainscrcall_cluster_location_awk
+			;;
+ 		3b)
+			# Calling the SCRIPT below
+ 			mainscrcall_roi_featquery
+ 			;;
+		10)
+			clear
+
+			break
+			;;
+		*)
+			echo -en "No valid option chosen "
+
+			sleep 2
+			;;
+		esac
+	done
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+# Script Main menu - Entering the functions with the tasks in order
+
+# Calling the function "MAIN_MENU_LOOP"
+MAIN_MENU_LOOP

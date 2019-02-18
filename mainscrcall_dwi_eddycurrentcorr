@@ -1,0 +1,479 @@
+#! /bin/bash
+
+# Proceed with eddy current and motion correction in DWI image files#
+# Uses the FSL tool "eddy_correct" to do so
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING FMRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+function eddy_headmotion_correct {
+# This function will perform eddy current and head motion correction
+
+# Asking the user for the index # for the non-diffusion image for all subjects to be processed
+echo -e "\n"
+echo -e "*** A reference volume is needed to be used as a target to register all other volumes ***"
+echo -e "It is usually the first volume (=0), which is a non-diffusion volume\n"
+
+echo -en "Please enter the index number for the reference volume for all subjects (usually 0): "
+read reference_volume
+
+# Establishing the initial numbering for subjects counting
+count_subj=0
+
+# Loop to process all subjects
+for SUBJ in ${SUBJLIST}
+do
+	# First checking if there is any DWI file for this subject
+	DWI_files_list=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${dwi_filename}.nii.gz 2> /dev/null`
+
+	if [ -n "${DWI_files_list}" ]
+	then
+		for item in ${DWI_files_list}
+		do
+			# Storing each DWI file and its folder into a variable. Observe the use of a dot before the wildcard in the sed command - necessary for it to see the asterisk as a wild card - and also single quotes
+			DWI_file=`echo ${item} | awk -F/ '{print $NF}'`
+			DWI_directory=`echo ${item} | sed 's!'${dwi_mainfolder_path}/${SUBJ}/'!!' | sed 's!'/${DWI_file}'!!'`
+
+			# Gathering the number of volumes into a variable
+			n_vol=`fslval ${item} dim4`
+
+			# Calculating aproximate processing time, based on the FSL FDT wiki user guide estimation of 30s per volume. Dividing by 60 to get the results in minutes
+			process_time_subject=`echo " scale=1; (${n_vol} * 30)/60" | bc`
+
+			#####################################
+			###### Preparing the PPSS file using the FSL command "eddy_correct" to proceed with eddy current and head motion correction. Note the redirection of both STDOUT and STDERR to /dev/null using "&>", since "eddy_correct outputs a line for each volume processed #####
+			# Putting the full command into a variable
+			command_processing=`echo "eddy_correct ${item} ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/data_DWI01_edccorr ${reference_volume} &> /dev/null"`
+			
+			# Adding the command to the ppss processing text file
+			echo "${command_processing}" >> ${temp_folder}/${ppss_command_file}
+
+			##### Creating a LOG file with the commands used for later QA if needed #####
+			echo "OS name and version: ${os_nameandversion}; Command: eddy_correct; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/LOGFILE_eddy-current-correction_eddycorrect_${DWI_file}.txt
+
+			echo -e "Command \"eddy_correct\" to do eddy current and head motion correction to the DWI file (reoriented to MNI)" >> ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/LOGFILE_eddy-current-correction_eddycorrect_${DWI_file}.txt
+
+			echo -e "\n${command_processing}" >> ${dwi_mainfolder_path}/${SUBJ}/${DWI_directory}/LOGFILE_eddy-current-correction_eddycorrect_${DWI_file}.txt
+			#####################################
+
+			# Adding a unit to the counting variable
+			((count_subj++))
+
+			# Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+			subj_process="${subj_process} ${SUBJ}"
+		done
+	else
+		echo -e "\n"
+		echo -e "##### No diffusion-weighted files were found for subject \"$SUBJ\" #####"
+		echo -e "Skipping this subject for no-diffusion image extraction\n"
+
+		echo -en "Press any key to continue "
+		read -n1 anykey
+
+		# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+		subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+	fi
+done
+
+# Estimating total processing time.
+process_time_total_minutes=`echo " scale=1; (${process_time_subject} * ${count_subj} )" | bc` # Result in minutes
+process_time_total_hours=`echo " scale=1; (${process_time_subject} * ${count_subj} )/60" | bc` # Dividing by 60 to get the results in hours
+}
+
+function dwi_headmotion_calc {
+# This function will calculate the head motion in the DWI image file
+# This was adapted from a post in the FSL mailing list
+# Written by Mark Jenkinson from the FSL team
+# Posted in the FSL mailing list with the subject "Re: measure of DTI motion", date "Tue, 11 Jan 2011 17:23:56 +0000"
+
+# It needs a parameter to be passed to it, with the "ecclog" file to be used
+
+# Giving feedback to the user
+echo -e "\n"
+echo -en "Processing head motion for subject *** ${SUBJ} *** "
+
+# Going to the head_motion folder
+cd ${ecclog_file_orig_fullpath}/dwi_headmotion_calc
+
+# Mark's response commented below, followed by his script proper
+# Dear Charlotte,
+#
+# I've previously written a little script to do this which I'm including below.
+# The displacements are always relative to the first timepoint (assuming the
+# reference_no of 0 was used in eddy_correct) but apart from that it is
+# pretty general.
+#
+# If you run it you just need to give it the name of the .ecclog file (it also
+# assumes the original data has the same - without the .ecclog extension).
+# It will then produce ec_disp.png, ec_rot.png and ec_trans.png images
+# and the associated .txt files with the numbers in them.
+#
+# Let me know if you have any trouble running it.
+# You should just need to copy the text below into a file (make sure you keep
+# it as pure text and don't use Word or anything like that to make the file)
+# called ec_plot.sh and then do :
+#   chmod 755 ec_plot.sh
+# If you put it in $FSLDIR/bin/ then it will be available wherever you are, but
+# if you put it somewhere else then you'll need to specify the path before
+# the "ec_plot.sh" name when you run it  (e.g.   ~/scripts/ec_plot.sh myfile.ecclog
+# if you put the file in ~/scripts/ )
+#
+# All the best,
+# 	Mark
+
+# I adapted the script since the "ecclog" file does not have the same name as the original data due to my script processing
+# I simply create a copy of the "ecclog" file with the same name as the original data for this script processing, the delete it
+
+# Important points from his description:
+# 1.  The displacements are always relative to the first timepoint
+# 2. The script assumes the original data has the same - without the .ecclog extension
+# 3. It will then produce ec_disp.png, ec_rot.png and ec_trans.png images and the associated .txt files with the numbers in them.
+# 4. Output text files have the following units: radians for rotations and mm for translations.
+
+##### Original script unmodified #####
+logfile=$1;
+basenm=`basename $logfile .ecclog`;
+
+nums=`grep -n 'Final' $logfile | sed 's/:.*//'`;
+
+touch grot_ts.txt
+touch grot.mat
+
+firsttime=yes;
+m=1;
+for n in $nums ; do
+#     echo "Timepoint $m" # Commented this out so there is no screen output
+    n1=`echo $n + 1 | bc` ;
+    n2=`echo $n + 5 | bc` ;
+    sed -n  "$n1,${n2}p" $logfile > grot.mat ;
+    if [ $firsttime = yes ] ; then firsttime=no; cp grot.mat grot.refmat ; cp grot.mat grot.oldmat ; fi
+    absval=`$FSLDIR/bin/rmsdiff grot.mat grot.refmat $basenm`;
+    relval=`$FSLDIR/bin/rmsdiff grot.mat grot.oldmat $basenm`;
+    cp grot.mat grot.oldmat
+    echo $absval $relval >> ec_disp.txt ;
+    $FSLDIR/bin/avscale --allparams grot.mat $basenm | grep 'Rotation Angles' | sed 's/.* = //' >> ec_rot.txt ;
+    $FSLDIR/bin/avscale --allparams grot.mat $basenm | grep 'Translations' | sed 's/.* = //' >> ec_trans.txt ;
+    m=`echo $m + 1 | bc`;
+done
+
+echo "absolute" > grot_labels.txt
+echo "relative" >> grot_labels.txt
+
+$FSLDIR/bin/fsl_tsplot -i ec_disp.txt -t 'Eddy Current estimated mean displacement (mm)' -l grot_labels.txt -o ec_disp.png
+
+echo "x" > grot_labels.txt
+echo "y" >> grot_labels.txt
+echo "z" >> grot_labels.txt
+
+$FSLDIR/bin/fsl_tsplot -i ec_rot.txt -t 'Eddy Current estimated rotations (radians)' -l grot_labels.txt -o ec_rot.png
+$FSLDIR/bin/fsl_tsplot -i ec_trans.txt -t 'Eddy Current estimated translations (mm)' -l grot_labels.txt -o ec_trans.png
+
+# clean up temp files
+/bin/rm grot_labels.txt grot.oldmat grot.refmat grot.mat
+######################################
+
+# Giving feedback to the user
+echo
+echo -en "Finished "
+
+# Going back to the /tmp folder
+cd /tmp
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir # Where the temporary files will be held
+ppss_command_file=eddy_correct_fileslist.txt
+
+dwi_mainfolder_path=${SUBJS_FOLDERS_PATH} # Where the DWI files are. Can be modified by the user in this script.
+dwi_subject_subfolder=DWI/DWI_42dirs_01 # To be used with "ls" command: The path to the subfolder within each subject's folder
+dwi_filename=data_DWI_stdMNI # The DWI file name for the file to be processed here
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+clear
+
+# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+echo -e "This program will correct the diffusion-weighted data file for eddy current distortions and head motion"
+echo -e "This is an important pre-processing step in DWI analysis"
+
+echo
+echo -e "It may also calculate head motion in DWI image files after \"eddy_correct\" was used"
+
+##### GATHERING THE PATH TO THE ANALYSIS FOLDER #####
+# FUNCTION CALL: calls the function "analysis_mainfolder" in "mainscrcall_funclib" to allow the user to select the path to the subject's folders
+analysis_mainfolder DWI
+
+# Assigning the output variable from the function above to a local variable
+dwi_mainfolder_path=${ANALYSIS_MAINFOLDER_PATH}
+######################################################
+
+###### MAIN MENU: Giving information to the user on what this script will do #####
+# MAIN MENU
+echo -e "\n"
+echo -e "Processing eddy current distortions and head motion correction"
+
+echo -e "\t1. Proceed with *** eddy current and head motion correction ***"
+echo -e "\t2. Calculate *** head motion *** for the original DWI image file (already reoriented to MNI template)"
+echo -e "\t0. Back to main menu"
+
+echo
+echo -en "Please enter here your option: "
+read eddycorrect_process
+
+while [ 1 ]
+do
+	case ${eddycorrect_process} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+		sleep 2
+
+		exit
+		;;
+	1)
+		echo
+		echo -e "This script will perform eddy current distortions and head motion correction for the subjects listed:\n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing the initial subject numbering
+		count=1
+
+		for SUBJ in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo "${counter}) ${SUBJ}"
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the variable below
+		unset count counter
+
+		# Warning the user that the script expects the DWI file to be named properly
+		echo
+		echo -e "*** Please note that this script expects you DWI file to be named exactly as \"${dwi_filename}\" ***"
+		echo -e "If it does not find a file named like this, it will generate an error"
+		echo -en "Press any key to continue "
+		read anykey
+
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dwi_eddycurrentcorr:Correct for eddy current and head motion in DWI images" FSL "(eddy_headmotion_correct) eddy_correct"
+
+		####### MAIN PATH TO SUBJECTS FOLDER CHECK ##############
+		# Checking if used the original path to DWI files or the user entered another one ("default_path" variable originates from function "DWI_mainfolder" in "functionslibr_FSL")
+		if [ ${default_path} = yes ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used the default path for DWI data: ${dwi_mainfolder_path}"
+
+		elif [ ${default_path} = no ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used an alternative path for DWI data: ${dwi_mainfolder_path}"
+		fi
+		#########################################################
+
+		# FUNCTION CALL: Calls the function "eddy_headmotion_correct" to perform eddy current and head motion correction
+		eddy_headmotion_correct
+
+		# Giving feedback to the user and allow him to review the processing info BEFORE starting PPSS
+		echo -e "\n"
+		echo -e "##### PROCESSING INFO #####"
+		echo -e "Reference volume to be used = ${reference_volume}"
+		echo -e "Number of subjects ready for processing = ${count_subj}"
+
+		echo
+		echo -en "Press any key to proceed "
+		read -n1 anykey
+
+		# Telling the user that processing will start now
+		echo -e "### Start processing for all subjects at: `current_date_time 2` ###"
+		echo -e "Estimated processing time per subject = ${process_time_subject} minutes"
+		echo -e "Estimated total time (serial processing) = ${process_time_total_minutes} minutes (${process_time_total_hours} hours)"
+		echo -e "####################################################"
+
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+			# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+			echo
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -e "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_listed2process" in "mainscrcall_funclib" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_listed2process
+		################################################
+
+		echo -e "The DWI file after eddy current and head motion correction is named \"data_DWI01_edccorr\", located within the \"DWI\" folder for  each subject"
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	2)
+		echo
+		echo -e "This script will calculate head motion in DWI image files the subjects listed:\n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing the initial subject numbering
+		count=1
+
+		for SUBJ in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo "${counter}) ${SUBJ}"
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the variable below
+		unset count counter
+
+		# Warning the user that the script expects the DWI file to be named properly
+		echo
+		echo -e "*** Please note that this script needs that eddy current and head motion to be done already, as it needs the \"ecclog\" as outputed by the \"eddy_correct\" tool ***"
+		echo -e "If it does not find a file named like this, it will generate an error"
+		echo -en "Press any key to continue "
+		read anykey
+
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "dwi_eddycurrentcorr:Check head motion in DWI images" FSL "(dwi_headmotion_calc) custom_script"
+
+		####### MAIN PATH TO SUBJECTS FOLDER CHECK ##############
+		# Checking if used the original path to DWI files or the user entered another one ("default_path" variable originates from function "DWI_mainfolder" in "functionslibr_FSL")
+		if [ ${default_path} = yes ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used the default path for DWI data: ${dwi_mainfolder_path}"
+
+		elif [ ${default_path} = no ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used an alternative path for DWI data: ${dwi_mainfolder_path}"
+		fi
+		#########################################################
+
+		# Loop to go through each subject for processing
+		for SUBJ in ${SUBJLIST}
+		do
+			# Assigning to a variable the full path for the "data_DWI01_edccorr.ecclog" file
+			ecclog_file_orig=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/data_DWI01_edccorr.ecclog 2> /dev/null`
+			ecclog_file_orig_fullpath=`ls -d ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder} 2> /dev/null`
+
+			# Checking if the "data_DWI01_edccorrecclog" file exists, indicating the eddy correction was done (the ecclog file name is that as given following my script use for eddy_correct - it takes the name of the output file from eddy_correct command call).
+
+			if [ X${ecclog_file_orig} = X ] # Checking if this variable is empty
+			then
+				# In this case, the variable is empty. Giving feedback to the user
+				echo
+				echo -e "Could not find a file named \"data_DWI01_edccorr.ecclog\" in the main DWI folder for subject \"${SUBJ}\""
+				echo -e "This file is needed to estimate head motion for the DWI image file"
+
+				echo
+				echo -en "Press any key to continue, or Ctrl+C to go back to the PROCESSING menu "
+				read -n 1 anykey
+
+				# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+				subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+			else
+				# In this case, the variable holds the path for the ecclog file
+				# Creating a "head_motion_cal" within the main DWI folder
+				mkdir ${ecclog_file_orig_fullpath}/dwi_headmotion_calc 2> /dev/null
+
+				# Making a symbolic link for the DWI image file reoriented to MNI into the "dwi_headmotion_calc" folder
+				ln -s ${ecclog_file_orig_fullpath}/${dwi_filename}.nii.gz ${ecclog_file_orig_fullpath}/dwi_headmotion_calc/${dwi_filename}.nii.gz 2> /dev/null
+
+				# Making a copy of the ecclog file into the "dwi_headmotioc_cal" folder, and renaming it as the original DWI image file (needed for head motion calculation)
+				cp ${ecclog_file_orig} ${ecclog_file_orig_fullpath}/dwi_headmotion_calc/${dwi_filename}.ecclog
+			fi
+
+			# FUNCTION CALL: Calls the function "dwi_headmotion_calc" to calculate the head motion in the DWI image file. Note the ecclog passed as a parameter
+			dwi_headmotion_calc ${ecclog_file_orig_fullpath}/dwi_headmotion_calc/${dwi_filename}.ecclog
+
+			# Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+			subj_process="${subj_process} ${SUBJ}"
+		done
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_listed2process" in "mainscrcall_funclib" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_listed2process
+		################################################
+
+		echo
+		echo -e "Head motion plots and raw data are located within \"dwi_headmotion_calc\" folder, located within the DWI main folder for  each subject"
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	*)
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+# Removing temporary folders and files created
+rm -r ${temp_folder} 2> /dev/null

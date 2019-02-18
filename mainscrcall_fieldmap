@@ -1,0 +1,1205 @@
+#! /bin/bash
+
+########## Script to process field maps images ##########
+########## Created in March 03, 2011 by Estephan Moana Filho ##########
+########## v1.0 ##########
+
+##### Modifications #####
+########## Modified in October 28, 2011 by Estephan Moana Filho ##########
+########## Modified in December 02, 2013 by Estephan Moana Filho ##########
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function modalities_selection {
+# This function will allow the user to choose the type of modalities to be processed by "fsl_motion_outliers"
+
+while [ 1 ]
+do
+	# Allowing the user to choose the imaging modalities to be processed
+	echo -e "\n"
+	echo -e "First, choose the imaging modality (ies) to be processed:"
+	echo -e "\t1) Diffusion-weighted (DWI)"
+	echo -e "\t2) Functional BOLD (func_BOLD)"
+	echo -e "\t3) Resting BOLD (rest_BOLD)"
+	echo -e "\t4) Functional ASL (func_ASL)"
+	echo -e "\t5) Resting ASL (rest_ASL)\n"
+
+	echo -en "Please enter the number(s) of the chosen type(s) (If more than one, please separate with space; if all enter \"all\"): "
+	read modalities_type_choose
+
+	# Making the modalities types "modalities_type_choose" variable to be listed in a numbered list for the user
+	if [ -n "${modalities_type_choose}" ] && [ "${modalities_type_choose}" != all ] # Checking if this variable is non-zero in length AND different than "all"
+	then
+		# Establishing the initial modalities type numbering
+		type_number=1
+
+		# Collecting the metrics listed in the "metric_choose" variable into another variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+		var1_available=`for modalities_type_item in ${modalities_available}; do echo "${type_number}=${modalities_type_item}"; type_number=$[ $type_number + 1 ]; done` # variable with all the files in a numbered list
+		var2_list="${modalities_type_choose}" # The numbers chosen by the user corresponding to the files to be used
+
+		# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+		numbered_list_display "${var1_available}" "${var2_list}"
+
+		# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+		modalities_type_use="${files_to_use}"
+
+		# Cleaning the contents of the variables below
+		unset files_to_use type_number
+
+		break
+
+	elif [ -n "${modalities_type_choose}" ] && [ "${modalities_type_choose}" = all ] # Checking if this variable is non-zero in length AND equal than "all"
+	then
+		# Assigning all modalities available as described by the variable "modalities_available" to the variable used for processing
+		modalities_type_use="${modalities_available}"
+
+		break
+
+	else
+		echo
+		echo -e "*** No modalities type was choosen ***"
+		echo -e "It will use only \"functional\" type in this case\n"
+
+		echo -en "Press any key to choose at least one modality "
+		read -n1 anykey
+	fi
+done
+}
+
+function manual_automated_processing {
+# This functions allows the user to do processing of fieldmap files automated or manually
+while [ 1 ]
+do
+	echo
+	echo -e "Please choose if you want to process the FIELDMAP files:"
+	echo -e "1. AUTOMATED (will use the available FIELDMAP file for processing)"
+	echo -e "2. MANUALLY (you can choose each FIELDMAP file for each modality for each subject)"
+
+	echo
+	echo -en "Please enter your option: "
+	read fieldmap_processing_user
+
+	# Giving feedback to the user and allowing to confirm option
+	if [ -n "${fieldmap_processing_user}" ] && [ ${fieldmap_processing_user} = 1 ]
+	then
+		echo
+		echo -e "Using AUTOMATED processing"
+
+		# Assigning the variable signaling the processing mode chosen
+		fieldmap_processing=AUTOMATED
+
+		echo -en "Press any key to continue "
+		read -n 1 anykey
+
+		break
+
+	elif [ -n "${fieldmap_processing_user}" ] && [ ${fieldmap_processing_user} = 2 ]
+	then
+		echo
+		echo -e "Using MANUAL processing"
+
+		# Assigning the variable signaling the processing mode chosen
+		fieldmap_processing=MANUAL
+
+		echo -en "Press any key to continue "
+		read -n 1 anykey
+
+		break
+	else
+		echo
+		echo -en "Please choose one of the options above "
+
+		sleep 2
+	fi
+done
+}
+
+function fieldmap_processing_main {
+# This is the main function that will make all the necessary steps for FIELDMAP image processing
+
+clear
+cd /tmp
+
+# Checking if performing skull extraction from FIELDMAP magnitude images
+if [ ${processing_step} = skullextract ]
+then
+	# Giving feedback to the user on how skull extraction on FIELDMAP magnitude images should be done more strictly.
+	echo -e "FSL experts recommend a TIGHT NON-SKULL TISSUE EXTRACTION, as the noisy voxels in the brain's periphery are problematic.\nAlso note that this script will extract the first volume of the 2 usually available from Siemens MRI scanner fieldmaps"
+	echo -e "From their website (http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FUGUE/Guide#SIEMENS_data):"
+
+	echo
+	echo -e "\t\"Brain extraction of the magnitude image is very important and must be tight - that is, IT MUST EXCLUDE ALL NON-BRAIN VOXELS AND ANY VOXELS WITH ONLY A SMALL PARTIAL VOLUME CONTRIBUTION. The reason for this is that these areas are normally very noisy in the phase image (look at them in FSLView - if they are not noisy then this is not so important). *** IT IS CRUCIAL THAT THE MASK (DERIVED FROM THIS BRAIN EXTRACTED IMAGE) CONTAINS FEW OF THESE NOISY VOXELS. THIS IS MOST EASILY DONE BY MAKING THE BRAIN EXTRACTION VERY TIGHT, ERRING ON EXCLUDING BRAIN VOXELS. *** The exclusion of brain voxels in this instance is actually fine and will have no repercussions, since the fieldmap is extrapolated beyond this mask, and that is the only purpose that the mask plays. *** THEREFORE MAKE SURE YOUR MASK IS (IF IT CAN'T BE PERFECT) TOO SMALL. *** As noted above, either magnitude image (from the different echos) can normally be used here - it is not that important.\""
+
+	echo
+	echo -en "Press any key to continue "
+	read -n 1 anykey
+
+	echo
+	echo -e "\tProcessing skull extraction from FIELDMAP magnitude images for subjects:\n"
+
+# Checking if processing FIELDMAP images from SIEMENS scanners so they are correctly calibrated in units of rad/s
+elif [ ${processing_step} = fieldmap_convert_SIEMENS ]
+then
+	echo -e "\n"
+	echo -e "The echo time (TE) difference of the FIELDMAP sequence is necessary for processing - (defaults are *usually* 2.46ms on SIEMENS)"
+	echo -e "The two TEs are described in the pulse sequence, so you can determine the difference by subtracting them"
+
+	while [ 1 ]
+	do
+		echo
+		echo -en "Enter here the TE difference for this image in milliseconds (Hit ENTER for default (2.46)): "
+		read TE_difference_ms_user
+
+		# Checking if the user wants to use the default value
+		if [ -z "${TE_difference_ms_user}" ]
+		then
+			TE_difference_ms_user=2.46
+		fi
+
+		echo
+		echo -e "This is the information needed apriori to proceed:"
+		echo -e "MRI scanner used to acquire FIELDMAP files = ${scanner_used}"
+		echo -e "TE difference (ms) = ${TE_difference_ms_user}"
+
+		echo
+		echo -en "Is this correct? (y/n) "
+		read conf
+
+		if [ ${conf} = y ]
+		then
+			##### PROCESSING VARIABLE #####
+			# Assigning the TE difference value to the processing variable
+			TE_difference_ms=${TE_difference_ms_user}
+			###############################
+
+			break
+		else
+			echo
+			echo -en "Please correct the TE difference entered "
+
+			sleep 2
+		fi
+	done
+
+	echo -e "\tProcessing FIELDMAP images to convert them to \"rad/s\" units for subjects:\n"
+fi
+
+# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+# Establishing the initial numbering
+count=1
+
+for SUBJ in ${SUBJLIST}
+do
+	counter=`printf "%02d" ${count}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+	echo "${counter}) ${SUBJ}"
+
+	# Adding a unit to the numbering variable
+	((count++))
+done
+
+# Start processing
+for SUBJ in ${SUBJLIST}
+do
+	echo -e "\n"
+	echo -e "#############################################"
+	echo -e "Processing subject *** ${SUBJ} *** "
+	echo -e "#############################################"
+
+	# Looping through each imaging modalities
+	for item1 in ${modalities_type_use}
+	do
+		# Checking the image modality being processed (DWI, FUNCTIONAL or RESTING BOLD/ASL).
+		if [ ${item1} = DWI ]
+		then
+			# Variables for path to the files being processed
+			modalities_type_folder=DWI
+
+			image_type_contrast=DIFFUSION-WEIGHTED
+			modality_contrast=DWI
+
+		elif [ ${item1} = func_BOLD ]
+		then
+			# Variables for path to the files being processed
+			modalities_type_folder=func
+
+			image_type_contrast="FUNCTIONAL BOLD"
+			modality_contrast=BOLD
+
+		elif [ ${item1} = rest_BOLD ]
+		then
+			# Variables for path to the files being processed
+			modalities_type_folder=rest
+
+			image_type_contrast="RESTING BOLD"
+			modality_contrast=restingBOLD
+
+		elif [ ${item1} = func_ASL ]
+		then
+			# Variables for path to the files being processed
+			modalities_type_folder=func
+
+			image_type_contrast="FUNCTIONAL ASL"
+			modality_contrast=ASL
+
+		elif [ ${item1} = rest_ASL ]
+		then
+			# Variables for path to the files being processed
+			modalities_type_folder=rest
+
+			image_type_contrast="RESTING ASL"
+			modality_contrast=restingASL
+		fi
+
+		# Giving feedback to the user
+		echo -e "\n"
+		echo -e "Processing *** ${image_type_contrast} *** FIELDMAP files"
+
+		# Checking if processing is to be done AUTOMATED or MANUAL
+		if [ ${fieldmap_processing} = AUTOMATED ]
+		then
+			# Checking if performing skull extraction from FIELDMAP magnitude images
+			if [ ${processing_step} = skullextract ]
+			then
+				##### PROCESSING VARIABLE #####
+				# Listing the FIELDMAP magnitude files into a variable
+				# Notice the different use of single quotes with the "sed" command, due to the use of variables within it`
+				fieldmap_mag_list=`ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${SUBJ}_fieldmap_${modality_contrast}_mag*_stdMNI.nii.gz 2> /dev/null | awk -F/ '{print $NF}'`
+				###############################
+
+				# Checking if the variable has contents
+				if [ -n "${fieldmap_mag_list}" ]
+				then
+					echo
+					echo -e "Preparing FIELDMAP image(s) for subject ### ${SUBJ} ### for processing"
+					echo -en "FIELDMAP magnitude files to be processed:\n${fieldmap_mag_list} "
+				else
+					echo
+					echo -en "Subject \"${SUBJ}\" has no FIELDMAP magnitude file(s) and will be skipped "
+
+					echo
+					echo -en "Press any key to continue "
+					read -n 1 anykey
+				fi
+
+			# Checking if processing FIELDMAP images from SIEMENS scanners so they are correctly calibrated in units of rad/s
+			elif [ ${processing_step} = fieldmap_convert_SIEMENS ]
+			then
+				##### PROCESSING VARIABLE #####
+				# Initializing arrays for use below
+				fieldmap_image_list=()
+				fieldmap_mag_nonskull_list=()
+
+				# Listing the FIELDMAP files into an array
+				for item in `ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_0?/${SUBJ}_fieldmap_${modality_contrast}*_stdMNI.nii.gz 2> /dev/null | awk -F/ '{print $NF}'`
+				do
+					# Assigning the file listed into the array
+					fieldmap_image_list+=("${item}")
+				done
+
+				# Listing the FIELDMAP magnitude files into a variable
+				for item in `ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${SUBJ}_fieldmap_${modality_contrast}_mag*_stdMNI_brain.nii.gz 2> /dev/null | awk -F/ '{print $NF}'`
+				do
+					# Assigning the file listed into the array
+					fieldmap_mag_nonskull_list+=("${item}")
+				done
+
+				# Checking if the array has contents
+				if [ "${#fieldmap_image_list[@]}" -ne 0 ] && [ "${#fieldmap_mag_nonskull_list[@]}" -ne 0 ]
+				then
+					echo
+					echo -e "Preparing FIELDMAP image(s) for subject ### ${SUBJ} ### for processing"
+					echo -en "FIELDMAP file(s) to be processed:\n"${fieldmap_image_list[@]}" "
+				else
+					echo
+					echo -en "Subject \"${SUBJ}\" has no FIELDMAP phase or FIELDMAP magnitude file(s) and will be skipped "
+
+					echo
+					echo -en "Press any key to continue "
+					read -n 1 anykey
+				fi
+			fi
+
+		elif [ ${fieldmap_processing} = MANUAL ]
+		then
+			# Checking if performing skull extraction from FIELDMAP magnitude images
+			if [ ${processing_step} = skullextract ]
+			then
+				while [ 1 ]
+				do
+					# Presenting the FIELDMAP magnitude image folders to the user
+					echo -e "\n"
+					echo -e "These are the FIELDMAP magnitude folder(s) for subject ### ${SUBJ} ###, and their respective files:\n"
+
+					# Notice the different use of single quotes with the "sed" command, due to the use of variables within it`
+					ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${SUBJ}_fieldmap_${modality_contrast}_mag*_stdMNI.nii.gz | awk -F/ '{print $NF}' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/) /'
+
+					echo -e "\n"
+					echo -en "Enter the number corresponding to the FIELDMAP magnitude files to have their skull extracted (if more than one separate by space; hit ENTER to skip): "
+					read fieldmap_mag_list_user
+
+					if [ -n "${fieldmap_mag_list_user}" ] # Checking if this variable is non-zero in length
+					then
+						# Collecting the anatomical files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+						var1_available=`ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${SUBJ}_fieldmap_${modality_contrast}_mag*_stdMNI.nii.gz | awk -F/ '{print $NF}' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+						var2_list="${fieldmap_mag_list_user}" # The numbers chosen by the user corresponding to the files to be used
+
+						# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+						numbered_list_display "${var1_available}" "${var2_list}"
+
+						# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+						fieldmap_mag_list_user="${files_to_use}"
+
+						# Cleaning the contents of the variables below
+						unset files_to_use
+
+					elif [ -z "${fieldmap_mag_list_user}" ] # Checking if this variable is non-zero in length
+					then
+						echo
+						echo -en "Subject \"${SUBJ}\" has no FIELDMAP magnitude file(s) selected and will be skipped "
+
+						echo
+						echo -en "Press any key to continue "
+						read -n 1 anykey
+
+						break
+					fi
+
+					echo
+					echo -e "\nFIELDMAP magnitude FILES entered:"
+
+					# Loop to display each file in a line
+					# Establishing the initial numbering
+					count=1
+
+					for item in  ${fieldmap_mag_list_user}
+					do
+						counter=`printf "%02d" ${count}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+						echo "${counter}) ${item}"
+
+						# Adding a unit to the numbering variable
+						((count++))
+					done
+
+					echo
+					echo -en "Is this correct? (y/n) "
+					read conf
+
+					# Check if the functional runs entered are correct
+					if [ ${conf} = y ]
+					then
+						echo -e "\n"
+						echo -e "Preparing FIELDMAP image(s) for subject ### ${SUBJ} ### for processing"
+
+						##### PROCESSING VARIABLE #####
+						# Assigning the FIELDMAP magnitude images list to the processing variable
+						fieldmap_mag_list=${fieldmap_mag_list_user}
+						###############################
+
+						break
+					else
+						echo -e "\n"
+						echo -en "Please correct the fieldmap magnitude FILES entered "
+						sleep 2
+					fi
+				done
+
+			# Checking if processing FIELDMAP images from SIEMENS scanners so they are correctly calibrated in units of rad/s
+			elif [ ${processing_step} = fieldmap_convert_SIEMENS ]
+			then
+				while [ 1 ]
+				do
+					#########################################################################
+					# Presenting the FIELDMAP magnitude file with non-brain tissue extracted to the user
+					echo -e "\n"
+					echo -e "############################################################"
+					echo -e "These are the *** FIELDMAP magnitude file(s) *** with non-brain tissue extracted for subject ### ${SUBJ} ###, and their respective files:\n"
+
+					# Notice the different use of single quotes with the "sed" command, due to the use of variables within it`
+					ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${SUBJ}_fieldmap_${modality_contrast}_mag*_stdMNI_brain.nii.gz | awk -F/ '{print $NF}' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/) /'
+
+					echo
+					echo -en "Enter the number corresponding to the FIELDMAP magnitude file(s) with non-brain tissue extracted to be used for processing (if more than one separate by space; hit ENTER to skip): "
+					read fieldmap_mag_nonskull_list_user
+
+					if [ -n "${fieldmap_mag_nonskull_list_user}" ] # Checking if this variable is non-zero in length
+					then
+						# Collecting the anatomical files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+						var1_available=`ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${SUBJ}_fieldmap_${modality_contrast}_mag*_stdMNI_brain.nii.gz | awk -F/ '{print $NF}' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+						var2_list="${fieldmap_mag_nonskull_list_user}" # The numbers chosen by the user corresponding to the files to be used
+
+						# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+						numbered_list_display "${var1_available}" "${var2_list}"
+
+						# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+						fieldmap_mag_nonskull_list_user="${files_to_use}"
+
+						# Cleaning the contents of the variables below
+						unset files_to_use
+
+					elif [ -z "${fieldmap_mag_nonskull_list_user}" ] # Checking if this variable is non-zero in length
+					then
+						echo
+						echo -en "Subject \"${SUBJ}\" has no FIELDMAP magnitude file(s) with non-brain tissue extracted selected and will be skipped "
+
+						echo
+						echo -en "Press any key to continue "
+						read -n 1 anykey
+
+						break
+					fi
+
+					echo
+					echo -e "FIELDMAP magnitude file(s) with non-brain tissue extracted selected:"
+
+					# Loop to display each file in a line
+					# Establishing the initial numbering
+					count=1
+
+					for item in  ${fieldmap_mag_nonskull_list_user}
+					do
+						counter=`printf "%02d" ${count}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+						echo "${counter}) ${item}"
+
+						# Adding a unit to the numbering variable
+						((count++))
+					done
+
+					echo
+					echo -en "Is this correct? (y/n) "
+					read conf
+
+					# Check if the functional runs entered are correct
+					if [ ${conf} = y ]
+					then
+						echo
+						echo -e "Preparing FIELDMAP magnitude file(s) with non-brain tissue extracted for subject ### ${SUBJ} ### for processing"
+
+						##### PROCESSING ARRAY #####
+						# Initializing the array
+						fieldmap_mag_nonskull_list=()
+
+						# Assigning the FIELDMAP magnitude images list to the processing array
+						for item in ${fieldmap_mag_nonskull_list_user}
+						do
+							fieldmap_mag_nonskull_list+=("${item}")
+						done
+						###############################
+
+					else
+						echo -e "\n"
+						echo -en "Please correct the fieldmap magnitude FILES entered "
+
+						sleep 2
+					fi
+					#########################################################################
+
+					#########################################################################
+					# Presenting the FIELDMAP image folders to the user
+					# Confirming if folders listed are correct
+					echo
+					echo -e "These are the *** FIELDMAP file(s) *** for subject ### ${SUBJ} ###:\n"
+
+					ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_0?/${SUBJ}_fieldmap_${modality_contrast}*_stdMNI.nii.gz | awk -F/ '{print $NF}' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/) /'
+
+					echo
+					echo -en "Enter the number corresponding to the above FIELDMAP file to be converted into radians per second unit for subject \"${SUBJ}\" (if more than one separate by space): "
+					read fieldmap_image_list_user
+
+					if [ -n "${fieldmap_image_list_user}" ] # Checking if this variable is non-zero in length
+					then
+						# Collecting the anatomical files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+						var1_available=`ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_0?/${SUBJ}_fieldmap_${modality_contrast}*_stdMNI.nii.gz | awk -F/ '{print $NF}' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+						var2_list="${fieldmap_image_list_user}" # The numbers chosen by the user corresponding to the files to be used
+
+						# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+						numbered_list_display "${var1_available}" "${var2_list}"
+
+						# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+						fieldmap_image_list_user="${files_to_use}"
+
+						# Cleaning the contents of the variables below
+						unset files_to_use
+					else
+						echo
+						echo -en "Subject \"${SUBJ}\" has no FIELDMAP file(s) selected and will be skipped "
+
+						sleep 2
+
+						break
+					fi
+
+					echo
+					echo -e "FIELDMAP file selected:"
+
+					# Loop to display each file in a line
+					# Establishing the initial numbering
+					count=1
+
+					for item in ${fieldmap_image_list_user}
+					do
+						counter=`printf "%02d" ${count}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+						echo "${counter}) ${item}"
+
+						# Adding a unit to the numbering variable
+						((count++))
+					done
+
+					echo
+					echo -en "Is this correct? (y/n) "
+					read conf
+
+					# Check if the field map images entered are correct
+					if [ ${conf} = y ]
+					then
+						echo
+						echo -e "Preparing FIELDMAP file(s) for subject ### ${SUBJ} ### for processing"
+						echo -e "############################################################"
+
+						##### PROCESSING ARRAY #####
+						# Initializing the array
+						fieldmap_image_list=()
+
+						# Assigning the FIELDMAP magnitude images list to the processing array
+						for item in ${fieldmap_image_list_user}
+						do
+							fieldmap_image_list+=("${item}")
+						done
+						###############################
+
+						break
+					else
+						echo
+						echo -en "Please correct the FIELDMAP files entered "
+						sleep 2
+					fi
+				done
+			fi
+		fi
+
+		# Checking if performing skull extraction from FIELDMAP magnitude images
+		if [ ${processing_step} = skullextract ]
+		then
+			# Checking if the variable has contents
+			if [ -n "${fieldmap_mag_list}" ]
+			then
+				##############################################################################################
+				# Processing the FIELDMAP files using "fslroi" and "bet"
+				for item in ${fieldmap_mag_list}
+				do
+					# Extracting the folder path only and the file name with no extension
+					folder_path=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${item} | sed 's!'/${item}'!!'`
+					file_name=`echo ${item} | sed 's/.nii.gz//'`
+
+					##### Preparing the commands into a text file to be processed by PPSS #####
+					echo "fslroi ${folder_path}/${item} ${folder_path}/${file_name}_1stvol 0 1; bet ${folder_path}/${file_name}_1stvol.nii.gz ${folder_path}/${file_name}_brain -f 0.7 -g 0; rm ${folder_path}/${file_name}_1stvol.nii.gz" >> ${temp_folder}/${ppss_command_file}
+
+# 					echo "fslroi ${folder_path}/${item} ${folder_path}/${file_name}_1stvol 0 1; bet ${folder_path}/${file_name}_1stvol.nii.gz ${folder_path}/${file_name}_step1 -f 0.15 -g 0; bet ${folder_path}/${file_name}_step1.nii.gz ${folder_path}/${file_name}_brain -f 0.65 -g 0; rm ${folder_path}/${file_name}_1stvol.nii.gz; rm ${folder_path}/${file_name}_step1.nii.gz" >> ${temp_folder}/${ppss_command_file}
+					#####################################
+
+					##### Creating a LOG file with the commands used for later QA if needed #####
+					echo "OS name and version: ${os_nameandversion}; Commands: fslroi and bet; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${folder_path}/LOGFILE_Non-brain-tissue-removal-fieldmap-mag_bet_${file_name}.txt
+
+					echo -e "\nCommand FSLROI to extract the 1st volume from the FIELDMAP magnitude file and Command BET to remove non-brain tissue for FIELDMAP magnitude file 1st volume" >> ${folder_path}/LOGFILE_Non-brain-tissue-removal-fieldmap-mag_bet_${file_name}.txt
+
+					echo -e "\nfslroi ${folder_path}/${item} ${folder_path}/${file_name}_1stvol 0 1; bet ${folder_path}/${file_name}_1stvol.nii.gz ${folder_path}/${file_name}_brain -f 0.7 -g 0; rm ${folder_path}/${file_name}_1stvol.nii.gz" >> ${folder_path}/LOGFILE_Non-brain-tissue-removal-fieldmap-mag_bet_${file_name}.txt
+
+# 					echo -e "\nfslroi ${folder_path}/${item} ${folder_path}/${file_name}_1stvol 0 1; bet ${folder_path}/${file_name}_1stvol.nii.gz ${folder_path}/${file_name}_step1 -f 0.15 -g 0; bet ${folder_path}/${file_name}_step1.nii.gz ${folder_path}/${file_name}_brain -f 0.65 -g 0; rm ${folder_path}/${file_name}_1stvol.nii.gz; rm ${folder_path}/${file_name}_step1.nii.gz" >> ${folder_path}/LOGFILE_Non-brain-tissue-removal-fieldmap-mag_bet_${file_name}.txt
+					#####################################
+
+					# Variable to signal if this subject will be processed
+					subj_processed=yes
+
+					sleep 1
+				done
+				##############################################################################################
+			else
+				# Variable to signal if this subject will be processed
+				subj_processed=no
+			fi
+
+		# Checking if processing FIELDMAP images from SIEMENS scanners so they are correctly calibrated in units of rad/s
+		elif [ ${processing_step} = fieldmap_convert_SIEMENS ]
+		then
+			# Checking if both arrays have contents
+			if [ "${#fieldmap_image_list[@]}" -ne 0 ] && [ "${#fieldmap_mag_nonskull_list[@]}" -ne 0 ]
+			then
+				# Establishing the initial numbering
+				count=1
+
+				# Looping through the contents of both arrays
+				for ((count=0;count<${#fieldmap_image_list[@]};++count))
+				do
+					##############################################################################################
+					# This will convert the entered FIELDMAP images into rad/s units
+
+					# Assign the current array element into a variable
+					fieldmap_image=${fieldmap_image_list[count]}
+					fieldmap_mag_nonskull=${fieldmap_mag_nonskull_list[count]}
+
+					# Extracting the folder path only for the FIELDMAP file
+					folder_fieldmap_path=`ls -1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_0?/${fieldmap_image} | sed 's!'/${fieldmap_image}'!!'`
+
+					#Extracting the file name with no extension
+					fieldmap_image_name=`echo ${fieldmap_image} | sed 's/.nii.gz//'`
+
+					# Extracting the folder path only for the FIELDMAP magnitude file
+					folder_fieldmap_mag_path=`ls ${SUBJS_FOLDERS_PATH}/${SUBJ}/${modalities_type_folder}/fieldmap_${modality_contrast}_mag*/${fieldmap_mag_nonskull} | sed 's!'/${fieldmap_mag_nonskull}'!!'`
+
+					##### Preparing the commands into a text file to be processed by PPSS #####
+					echo "fsl_prepare_fieldmap ${scanner_used} ${folder_fieldmap_path}/${fieldmap_image} ${folder_fieldmap_mag_path}/${fieldmap_mag_nonskull} ${folder_fieldmap_path}/${fieldmap_image_name}_rads ${TE_difference_ms}" >> ${temp_folder}/${ppss_command_file}
+					#####################################
+
+					##### Creating a LOG file with the commands used for later QA if needed #####
+					echo "OS name and version: ${os_nameandversion}; Command: fsl_prepare_fieldmap; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${folder_fieldmap_path}/LOGFILE_conversion-fieldmap-rads-unit_fslpreparefieldmap_${fieldmap_image_name}.txt
+
+					echo -e "\nCommand fsl_prepare_fieldmap to convert FIELDMAP phase file to units of rad/s" >> ${folder_fieldmap_path}/LOGFILE_conversion-fieldmap-rads-unit_fslpreparefieldmap_${fieldmap_image_name}.txt
+
+					echo -e "\nfsl_prepare_fieldmap ${scanner_used} ${folder_fieldmap_path}/${fieldmap_image} ${folder_fieldmap_mag_path}/${fieldmap_mag_nonskull} ${folder_fieldmap_path}/${fieldmap_image_name}_rads ${TE_difference_ms}" >> ${folder_fieldmap_path}/LOGFILE_conversion-fieldmap-rads-unit_fslpreparefieldmap_${fieldmap_image_name}.txt
+					#####################################
+
+					# Variable to signal if this subject will be processed
+					subj_processed=yes
+
+					sleep 1
+					##############################################################################################
+				done
+			else
+				# Variable to signal if this subject will be processed
+				subj_processed=no
+			fi
+		fi
+	done
+
+	# Checking if this subject will be processed or not
+	if [ ${subj_processed} = yes ]
+	then
+		# Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+		subj_process="${subj_process} ${SUBJ}"
+
+	elif [ ${subj_processed} = no ]
+	then
+		# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+		subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+	fi
+done
+}
+
+function fieldmap_convert_NON-SIEMENS {
+# This function will process the FIELDMAP images from NON-SIEMENS scanners so they are correctly calibrated in units of rad/s
+clear
+cd /tmp
+
+echo
+echo -e "\tProcessing field mapimages for subjects:\n"
+
+for subj in ${SUBJLIST}
+do
+	echo ${subj}
+done
+
+for SUBJ in ${SUBJLIST}
+do
+	# Confirming if folders listed are correct
+	echo
+	echo -e "These are the fieldmap folder(s) for subject ### ${SUBJ} ###, and their respective files:\n"
+
+	ls -d1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/fieldmap*_0?/*.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/func/'!!' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/) /'
+
+	while [ 1 ]
+	do
+		echo
+		echo -en "Enter the number corresponding to the above fieldmap FILES to be converted into radians per second unit for subject \"${SUBJ}\" (if more than one separate by space): "
+		read fieldmap_list
+
+		if [ -n "${fieldmap_list}" ] # Checking if this variable is non-zero in length
+		then
+			# Collecting the anatomical files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+			var1_available=`ls -d1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/fieldmap*_0?/*.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/func/'!!' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+			var2_list="${fieldmap_list}" # The numbers chosen by the user corresponding to the files to be used
+
+			# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+			numbered_list_display "${var1_available}" "${var2_list}"
+
+			# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+			fieldmap_list="${files_to_use}"
+
+			# Cleaning the contents of the variables below
+			unset files_to_use
+		else
+			echo
+			echo -en "Subject \"${SUBJ}\" have no fieldmap(s) selected and will be skipped "
+			sleep 2
+
+			break
+		fi
+
+		echo -e "\nFolders entered:"
+
+		# Loop to show each file in a line for the user
+		for file in ${fieldmap_list}
+		do
+			echo ${file}
+		done
+
+		echo -en "\nIs this correct? (y/n) "
+		read conf
+
+		# Check if the field map images entered are correct
+		if [ ${conf} = y ]
+		then
+			# This will convert the entered fieldmap images unit into rad/s, as described in the FSL mailing list: "https://www.jiscmail.ac.uk/cgi-bin/webadmin?A2=ind0810&L=FSL&P=R33300&1=FSL&9=A&J=on&K=10&d=No+Match%3BMatch%3BMatches&z=4" - retrieved in 2011, Nov 09
+
+			for file in ${fieldmap_list}
+			do
+				# Extracting the folder and file names from the "file" variable. Note the dot before the asterisk - this is needed in order for sed to understand the wildcard
+				folder_name=`echo ${file} | awk 'BEGIN{FS="/"} {print $1}'`
+				file_name=`echo ${file} | awk 'BEGIN{FS="/"} {print $2}' | sed 's/.nii.gz//'`
+
+				# Collecting field map images info into variables
+				intensity_range=`fslstats ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${file} -R`
+				max_value=`fslstats ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${file} -R | awk '{print $2}'`
+				mid_value=`echo "scale=2; ${max_value} / 2" | bc`
+
+				echo -e "\n"
+				echo -e "Processing fieldmap image *** ${file} ***\n"
+				echo -e "This is the range of intensity values for this image: ${intensity_range}"
+				echo -e "This is the mid value for this range: ${mid_value}\n"
+
+				echo -e "You will also need the TE difference between echo times - for the 3T Trio Siemens scanner, this is usually 2.46ms"
+				echo -e "The two TEs are described in the pulse sequence, so you can determine the difference"
+
+				while [ 1 ]
+				do
+					echo
+					echo -en "Enter here the TE difference for this image (in milliseconds): "
+					read TE_difference_ms_user
+
+					# Transforming the TE difference from ms to seconds
+					TE_difference_sec=`echo "scale=5; ${TE_difference_ms_user} / 1000" | bc`
+
+					echo
+					echo -e "Using the information listed above and the TE difference entered, the final command to transform the units into rad/s will be (note that the TE difference is in seconds):\n"
+					echo -e "\tfslmaths ${file_name} -sub ${mid_value} -mul 3.14159 -div ${mid_value} -div ${TE_difference_sec} ${file_name}_radsec"
+
+					echo
+					echo -en "Is this correct? (y/n) "
+					read conf
+
+					if [ ${conf} = y ]
+					then
+						echo -e "\n"
+						echo -en "Converting into rad/s..."
+
+						# Issuing the command to proceed with the conversion into rad/s
+						fslmaths ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${file} -sub ${mid_value} -mul 3.14159 -div ${mid_value} -div ${TE_difference_sec} ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${folder_name}/${file_name}_radsec
+
+						echo -e "\n"
+						echo -e "Conversion done for fieldmap image ${file_name}\n"
+						echo -e "The range of intensity values for the created image \"${file_name}_radsec\" is: `fslstats ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${folder_name}/${file_name}_radsec -R`"
+
+						echo
+						echo -en "Press any key to continue "
+						read -n1 anykey
+
+						break
+					else
+						echo
+						echo -en "Please correct the TE difference entered "
+						sleep 2
+					fi
+				done
+			done
+
+			break
+		else
+			echo
+			echo -en "Please correct the fieldmap FILES entered "
+			sleep 2
+		fi
+	done
+done
+
+echo -e "\n"
+echo -e "\tConversion into rad/s for fieldmap images finished for these subjects: ${SUBJLIST}\n"
+cd /tmp
+}
+
+function fieldmap_regularize {
+# This function will regularize FIELDMAP images as needed - this is dependent on each scanner system and pulse sequence
+
+clear
+cd /tmp
+
+echo
+echo -e "This program will allow you to regularize fieldmap images - remove noise and/or comtamination around the edges of the brain"
+echo -e "The fieldmap images should be ALREADY converted into rad/s units!\n"
+
+echo -e "According to the FSL website on how to prepare fieldmaps for FEAT, you should try the different regularization procedures and check each using FSLview"
+echo -e "It may be that no regularization is the best option"
+echo -e "In their words: \n\t\"Note that the \"best\" regularisation will depend on many factors in the acquisition and must be determined separately for each site/scanner/sequence. Look at the fieldmap (e.g. using fslview) to decide what is the best regularisation to use - which could also be to do no regularisation\"\n"
+
+echo -en "Press any key to continue "
+read anykey
+
+echo -e "\n"
+echo -e "\tProcessing regularization of field mapimages for subjects:\n"
+
+for subj in ${SUBJLIST}
+do
+	echo ${subj}
+done
+
+for SUBJ in ${SUBJLIST}
+do
+	# Confirming if folders listed are correct
+	echo
+	echo -e "\tThese are the fieldmap folder(s) for subject ### ${SUBJ} ###, and their respective files already converted into rad/s units:\n"
+
+	ls -d1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/fieldmap*_0?/*radsec*.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/func/'!!' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/) /'
+
+	while [ 1 ]
+	do
+		echo
+		echo -en "\tPlease choose from the above fieldmap FILES the ones to be regularized for subject \"${SUBJ}\" (enter the whole line; if more than one separate by space): "
+		read fieldmap_list
+
+		if [ -n "${fieldmap_list}" ] # Checking if this variable is non-zero in length
+		then
+			# Collecting the anatomical files available into a variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+			var1_available=`ls -d1 ${SUBJS_FOLDERS_PATH}/${SUBJ}/func/fieldmap*_0?/*radsec*.nii.gz | sed 's!'${SUBJS_FOLDERS_PATH}/${SUBJ}/func/'!!' | sed 's!.nii.gz/!!' | sed "=" | sed 'N; s/\n/=/'` # variable with all the files in a numbered list
+			var2_list="${fieldmap_list}" # The numbers chosen by the user corresponding to the files to be used
+
+			# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+			numbered_list_display "${var1_available}" "${var2_list}"
+
+			# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+			fieldmap_list="${files_to_use}"
+
+			# Cleaning the contents of the variables below
+			unset files_to_use
+		else
+			echo
+			echo -en "Subject \"${SUBJ}\" have no fieldmap magnitude file(s) selected and will be skipped "
+			sleep 2
+
+			break
+		fi
+
+		echo
+		echo -en "Now enter which regularization method you wish to use: 1. Gaussian smoothing; 2. Despiking; and 3. Median filtering (enter 1,2, or 3) "
+		read reg_method_option
+
+		# Converting the method option chosen by the user into the words
+		if [ ${reg_method_option} = 1 ]
+		then
+			reg_method=gaussian_smoothing
+		elif [ ${reg_method_option} = 2 ]
+		then
+			reg_method=despiking
+		elif [ ${reg_method_option} = 3 ]
+		then
+			reg_method=median_filtering
+		else
+			reg_method="Incorrect option chosen!"
+		fi
+
+		echo
+		echo -e "\nFolders entered:"
+
+		# Loop to show each file in a line for the user
+		for file in ${fieldmap_list}
+		do
+			echo ${file}
+		done
+
+		echo
+		echo -e "Regularization method chosen: ${reg_method}"
+
+		echo
+		echo -en "\nIs this correct? (y/n) "
+		read conf
+
+		# Check if the field map images entered are correct
+		if [ ${conf} = y ]
+		then
+			# This will regularize the entered fieldmap images using the above chosen method
+			for file in ${fieldmap_list}
+			do
+				# Extracting the folder and file names from the "file" variable. Note the dot before the asterisk - this is needed in order for sed to understand the wildcard
+				folder_name=`echo ${file} | awk 'BEGIN{FS="/"} {print $1}'`
+				file_name=`echo ${file} | awk 'BEGIN{FS="/"} {print $2}' | sed 's/.nii.gz//'`
+
+				echo -e "\n"
+				echo -en "Processing regularization of fieldmap image \"${file}\" using method \"${reg_method}\" "
+
+				if [ ${reg_method} = "gaussian_smoothing" ]
+				then
+					fugue --loadfmap=${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${file} -s 1 --savefmap=${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${folder_name}/${file_name}_gaussian
+				elif [ ${reg_method} = "despiking" ]
+				then
+					fugue --loadfmap=${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${file} -s 1 --savefmap=${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${folder_name}/${file_name}_despiking
+				elif [ ${reg_method} = "median_filtering" ]
+				then
+					fugue --loadfmap=${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${file} -s 1 --savefmap=${SUBJS_FOLDERS_PATH}/${SUBJ}/func/${folder_name}/${file_name}_medianfiltering
+				else
+					echo
+					echo -e "Incorrect regularization method option chosen!"
+					echo -en "Going back to the PROCESSING menu "
+					sleep 2
+
+					exit
+				fi
+
+				echo -e "\n"
+				echo -e "Regularization done for fieldmap image \"${file_name}\""
+
+				sleep 2
+			done
+
+			break
+		else
+			echo
+			echo -en "Please correct the fieldmap FILES entered and/or regularization method to be used "
+			sleep 2
+		fi
+	done
+done
+
+echo -e "\n"
+echo -e "\tRegularization of fieldmap images finished for these subjects: ${SUBJLIST}\n"
+cd /tmp
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+########### CONSIDER REWRITING THIS SCRIPT WITH THE "fsl_prepare_fieldmap" COMMAND NEWLY RELEASED BY THE FSL PEOPLE IN 07/25/2012 ######
+
+################ VARIABLES TO BE USED IN THIS SCRIPT #################
+# Variable for the folder within "/tmp" for temporary files
+temp_folder=/tmp/ppss_tempdir_fieldmap
+
+# Variable with the basename for the file holding the commands for PPSS processing
+ppss_command_file=fieldmap_process_list.txt
+
+# Variable with all modalities that can be processed within this script
+modalities_available="DWI func_BOLD rest_BOLD func_ASL rest_ASL"
+######################################################################
+
+# Script Main menu - Entering the functions with the tasks in order
+clear
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed - this will be used both for emerald or local processing
+mkdir ${temp_folder} 2> /dev/null
+
+echo -e "#######################################################################################"
+echo -e "This program will prepare your FIELDMAP images to be used for EPI distortion correction"
+echo -e "#######################################################################################"
+
+echo
+echo -e "Same quality check steps are needed prior to processing:"
+echo -e "\t1. You *** MUST *** check the images dimension for both the magnitude (black background) and phase (grey background) images to be the same"
+echo -e "\tYou can check if this is the case by using option \"1e\" in the PROCESSING menu, then looking at the output file for the \"dim\" and \"pixdim\" entries and see if they match"
+echo -e "\tIf they do not have the same dimensions, you must resample them using FLIRT"
+
+echo
+echo -e "You can find all the steps necessary to unwarp EPI timeseries using fieldmaps here: \"http://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FUGUE/Guide#SIEMENS_data\"\n"
+
+##### Choosing the modalities to be processed #####
+# Loop for user enter info needed
+while [ 1 ]
+do
+	# FUNCTION CALL: Calling function "modalities_selection" to select which imaging modalities to be processed
+	modalities_selection
+
+	echo
+	echo -e "You entered the following modalities to be processed:"
+
+	# Establishing the initial numbering
+	count=1
+
+	for item in ${modalities_type_use}
+	do
+		counter=`printf "%02d" ${count}` # This is to add trailing zeros to this number, so instead of "2" you have "02" for example
+
+		echo "${counter}) ${item}"
+
+		# Adding a unit to the numbering variable
+		((count++))
+	done
+
+	echo
+	echo -en "Is this correct? (y/n) "
+	read yesno
+
+	if [ ${yesno} = y ] || [ ${yesno} = Y ]
+	then
+		# Going to the processing stage
+		break
+
+	elif [ ${yesno} = n ] || [ ${yesno} = N ]
+	then
+		echo -e "\n"
+		echo -en "Please correct the options entered "
+
+		sleep 2
+
+		# Cleaning the contents of the variable below
+		unset modalities_type_use
+	fi
+done
+###################################################
+
+echo
+echo -e "What do you want to do:"
+echo -e "\t1. Extract skull from the FIELDMAP magnitude image (*** 1st step needed ***)"
+echo -e "\t2. SIEMENS scanners: Process the FIELDMAP images convert it to \"rad/s\" units"
+
+echo
+echo -e "\t3. NON-SIEMENS Scanners: Process the FIELDMAP images convert it to \"rad/s\" units (NEEDS TO BE REVISED. LAst check in 04/12/2013)"
+echo -e "\t4. NON-SIEMENS Scanners: Regularize the FIELDMAP (May or may not be required - depends on the fieldmap images generated by your scanner and/or pulse sequence) (NEEDS TO BE REVISED. Last check in 04/12/2013)"
+echo -e "\t0. Back to main menu\n"
+
+echo -en "\t\tEnter your option here and press enter: "
+read process
+
+# Ask for user input to continue
+while [ 1 ]
+do
+	case ${process} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+		sleep 2
+		break ;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrcall_fieldmap:Extract non-brain tissues from fieldmap magnitude image" FSL "(fieldmap_processing_main) fslroi and bet (used pre-determined parameters optimized for fieldmap magnitude images)"
+
+		# Variable to signal the processing step to be done
+		processing_step=skullextract
+
+		# FUNCTION CALL: Calling function "manual_automated_processing" to allow the user to do processing of fieldmap files automated or manually
+		manual_automated_processing
+
+		# FUNCTION CALL: Calling function "fieldmap_processing_main" to use "fslroi" and "bet" to remove non-brain tissue from FIELDMAP magnitude images
+		fieldmap_processing_main
+
+
+		# Calling the function "parallel_processing_ppss" to extract non-brain tissues from ANATOMICAL images. Note the 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted here
+		parallel_processing_ppss ${temp_folder} ${ppss_command_file} calling_script
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_listed2process" in "mainscrcall_funclib" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_listed2process
+		################################################
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break ;;
+	2)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrcall_fieldmap:Extract non-brain tissues from fieldmap magnitude image" FSL "(fieldmap_processing_main) fslroi and bet (used pre-determined parameters optimized for fieldmap magnitude images)"
+
+		# Variable to signal the MRI scanner used to acquire the FIELDMAP files being processed
+		scanner_used=SIEMENS
+
+		# FUNCTION CALL: Calling function "manual_automated_processing" to allow the user to do processing of fieldmap files automated or manually
+		manual_automated_processing
+
+		# Variable to signal the processing step to be done
+		processing_step=fieldmap_convert_SIEMENS
+
+		# FUNCTION CALL: Calling function "fieldmap_processing_main" to use "fslroi" and "bet" to remove non-brain tissue from FIELDMAP magnitude images
+		fieldmap_processing_main
+
+		# Calling the function "parallel_processing_ppss" to extract non-brain tissues from ANATOMICAL images. Note the 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted here
+		parallel_processing_ppss ${temp_folder} ${ppss_command_file} calling_script
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_listed2process" in "mainscrcall_funclib" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_listed2process
+		################################################
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break ;;
+	3)
+		# FUNCTION CALL: Calling function "fieldmap_convert_NON-SIEMENS" to process the FIELDMAP images from NON-SIEMENS scanners so they are correctly calibrated in units of rad/s
+		fieldmap_convert_NON-SIEMENS
+
+		echo -e "Processed all FIELDMAP phase images succesfully\n"
+
+		# Ask for user input to continue
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break ;;
+	4)
+		# FUNCTION CALL: Calling function "fieldmap_regularize" to regularize FIELDMAP images as needed - this is dependent on each scanner system and pulse sequence
+		fieldmap_regularize
+
+		echo -e "Processed regularization of all fieldmap phase images succesfully\n"
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break ;;
+
+	*)
+		echo -e "No valid option chosen\n"
+		echo -e "Please re-enter an option\n"
+		sleep 2 ;;
+	esac
+done
+
+# Removing the temporary folder and its contents
+rm -rf ${temp_folder} 2> /dev/null
+
+# Removing all PPSS log files after user input
+rm -r $PPSS_DIR/* 2> /dev/null
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"

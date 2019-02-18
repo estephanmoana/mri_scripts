@@ -1,0 +1,575 @@
+#! /bin/bash
+
+# Script to check if the stimulus intensity in the "psychophys_software_output" files match that in the scan sheet
+
+# Sourcing of functions library files #
+. functionslibr_FSL
+
+# Has to define the following variables:
+# SUBJLIST # List of subjects to be processed
+# modality_list # list of the modalities to be processed
+# temp_folder # Temporary folder for files
+
+function count_file {
+# This function will count the files being processed, and will output them with a single zero padding
+
+# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+counter_file=`printf "%02d" ${count_files}`
+
+# Adding a unit to the counting variable
+((count_files++))
+}
+
+function count_line {
+# This function will count the lines being processed, and will output them with a single zero padding
+
+# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+counter_line=`printf "%02d" ${count_lines}`
+
+# Adding a unit to the counting variable
+((count_lines++))
+}
+
+function count_stim {
+# This function will count the stimulus being processed, and will output them with a single zero padding
+
+# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+counter_stim=`printf "%02d" ${count_stim}`
+
+# Adding a unit to the counting variable
+((count_stim++))
+}
+
+function extract_raw_info {
+# This function will extract the information from the raw psychophys output files into text files
+
+# Extracting the information from the psychophys output files for the subject being processed
+# Giving feedback to the user
+echo -e "\n"
+echo -e "Extracting the information from the psychophysical software output files"
+
+# Loop for processing each subject
+for SUBJ in ${SUBJLIST}
+do
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Processing subject \"${SUBJ}\" "
+
+# 	#################################################################################
+# 	# Creating a file to hold the output of this script for this subject
+# 	echo -e "Data extraction for psychophysical software output files for subject ${SUBJ}" > ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata.txt
+#
+# 	echo -e "Processing started at `current_date_time 2`" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata.txt
+#
+# 	# Adding headers to the output file
+# 	echo -e "Output file stimulus:Event count:Stim count:Date:Time:TR:Stimulus presented (yes/no):Stimulus present mode (single/simult):Stim1 type:Stim1 intensity(%):Stim1 Duration:Stim2 type:Stim2 intensity(%):Stim2 Duration" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata.txt
+# 	#################################################################################
+
+	# Variable to count the files being processed
+	count_files=1
+
+	# Loop to process each psychophys output file
+	for item1 in `ls ${subjs_mainfolder}/${SUBJ}/${psychophys_folder_rawdata}/${SUBJ}_*.txt`
+	do
+		# Checking if it is a valid file
+		if [ -n "${item1}" ] # Checking if this variable is not empty
+		then
+			# FUNCTION CALL: function "count_file" to count the files being processed, and will output them with a single zero padding
+			count_file
+
+			# Gathering several info into a variable
+			filename_fullpath=${item1} # Full path to the file
+			filename_only=`echo ${item1} | awk -F/ '{print $NF}'` # Filename only
+			filename_modality=`echo ${filename_only} | awk -F_ '{print $5}'` # Stimulus modality from file name
+
+			if [ -s "${item1}" ] # Checking if this is a file and it is not empty
+			then
+				# Checking if it is an "anat" folder, since it has a different file structure
+				if [ "X${filename_modality}" = XAuditory ] || [ "X${filename_modality}" = XIntermingled ] || [ "X${filename_modality}" = XMech ]
+				then
+					##############################################################
+					# Changing the *** FIELD SEPARATOR *** from space to new line
+					# First saving the original IFS variable
+					OLD_IFS=$IFS
+
+					# Now changing FIELD SEPARATOR to new line
+					IFS=$'\n'
+					##############################################################
+
+					# Variable to count the lines being processed
+					count_lines=1
+
+					# Variable to count the stimulus being processed
+					count_stim=1
+
+					##### Loop to go through each line of output file #####
+					for line_raw in `cat ${filename_fullpath}`
+					do
+						# Cleaning the Windows line break into Unix
+						line=`echo ${line_raw} | awk '{ sub(/\r$/,""); print }'`
+
+						# Variable for first item of line processed
+						line_1stitem=`echo ${line} | awk '{print $1}'`
+
+						# Checking the content of the first item for line being processed
+						if [[ ${line_1stitem} = Experiment ]] # Checking if it is the first line
+						then
+							# Creating the outputfile
+							> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+
+							# Variable to mark the type of line being processed
+							previousline_type=initial
+
+						elif [[ ${line_1stitem} = */*/???? ]] # Checking if it is a line initiating with a date
+						then
+							# Extracting the data to variables
+							line_date=`echo ${line} | awk '{print $1}'`
+							line_time=`echo ${line} | awk '{print $2":"$3}' | awk -F":" '{print $1"hr"$2"min"$3"s",$4}'`
+							line_TR=`echo ${line} | awk '{print $4}'`
+							line_stimpresented=no
+							line_stimpresentmode=-
+							counter_stim=-
+							line_stim_1_type=-
+							line_stim_1_intensity=-
+							line_stim_1_duration=-
+							line_stim_2_type=-
+							line_stim_2_intensity=-
+							line_stim_2_duration=-
+
+							# Checking if the previous line was "stimulus". If not, not need to process this line
+							if [ ${previousline_type} = initial ] || [ ${previousline_type} = stimulus ] || [ ${line_TR} = 208 ]
+							then
+								# FUNCTION CALL: function "count_line" to count the lines being processed, and will output them with a single zero padding
+								count_line
+
+								# Outputing to output file
+								echo -e "${filename_modality}:${counter_line}:${counter_stim}:${line_date}:${line_time}:${line_TR}:${line_stimpresented}:${line_stimpresentmode}:${line_stim_1_type}:${line_stim_1_intensity}:${line_stim_1_duration}:${line_stim_2_type}:${line_stim_2_intensity}:${line_stim_2_duration}" >> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+							fi
+
+							# Variable to mark the type of line being processed
+							previousline_type=dated
+							previousline_date=${line_date}
+							previousline_time=${line_time}
+							previousline_TR=${line_TR}
+
+						elif [[ ${line_1stitem} = A ]] # Checking if it is a line initiating with a "A" for auditory
+						then
+							# Extracting the data to variables
+							line_date=${previousline_date}
+							line_time=${previousline_time}
+							line_TR=${previousline_TR}
+							line_stimpresented=yes
+
+							if [ ${previousline_type} = stimulus ]
+							then
+								line_stimpresentmode=simultaneous
+							else
+								line_stimpresentmode=single
+							fi
+
+							# FUNCTION CALL: function "count_stim" to count the stimulus being processed, and will output them with a single zero padding
+							count_stim
+
+							line_stim_1_type=auditory
+							line_stim_1_intensity=`echo ${line} | awk -F";" '{print $3}' | awk '{print $NF}'`
+							line_stim_1_duration=`echo ${line} | awk -F";" '{print $2}' | awk '{print $NF}'`
+							line_stim_2_type=-
+							line_stim_2_intensity=-
+							line_stim_2_duration=-
+
+							# FUNCTION CALL: function "count_line" to count the lines being processed, and will output them with a single zero padding
+							count_line
+
+							# Variable to mark the type of line being processed
+							previousline_type=stimulus
+							previousline_date=-
+							previousline_time=-
+							previousline_TR=-
+
+							# Outputing to output file
+							echo -e "${filename_modality}:${counter_line}:${counter_stim}:${line_date}:${line_time}:${line_TR}:${line_stimpresented}:${line_stimpresentmode}:${line_stim_1_type}:${line_stim_1_intensity}:${line_stim_1_duration}:${line_stim_2_type}:${line_stim_2_intensity}:${line_stim_2_duration}" >> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+
+						elif [[ ${line_1stitem} = M ]] # Checking if it is a line initiating with a "A" for auditory
+						then
+							# Extracting the data to variables
+							line_date=${previousline_date}
+							line_time=${previousline_time}
+							line_TR=${previousline_TR}
+							line_stimpresented=yes
+
+							if [ ${previousline_type} = stimulus ]
+							then
+								line_stimpresentmode=simultaneous
+							else
+								line_stimpresentmode=single
+							fi
+
+							line_stim_1_type=mechanical
+							line_stim_1_intensity=`echo ${line} | awk -F";" '{print $2}' | awk '{print $NF}'`
+							line_stim_1_duration=`echo ${line} | awk -F";" '{print $1}' | awk '{print $NF}'`
+							line_stim_2_type=-
+							line_stim_2_intensity=-
+							line_stim_2_duration=-
+
+							# FUNCTION CALL: function "count_line" to count the lines being processed, and will output them with a single zero padding
+							count_line
+
+							# Variable to mark the type of line being processed
+							previousline_type=stimulus
+							previousline_date=-
+							previousline_time=-
+							previousline_TR=-
+
+							# Outputing to output file
+							echo -e "${filename_modality}:${counter_line}:${counter_stim}:${line_date}:${line_time}:${line_TR}:${line_stimpresented}:${line_stimpresentmode}:${line_stim_1_type}:${line_stim_1_intensity}:${line_stim_1_duration}:${line_stim_2_type}:${line_stim_2_intensity}:${line_stim_2_duration}" >> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+						fi
+					done
+
+					##############################################################
+					# Changing the *** FIELD SEPARATOR *** back to the default
+					IFS=$OLD_IFS
+					##############################################################
+
+				elif [ "X${filename_modality}" = XSimultaneous ]
+				then
+					##############################################################
+					# Changing the *** FIELD SEPARATOR *** from space to new line
+					# First saving the original IFS variable
+					OLD_IFS=$IFS
+
+					# Now changing FIELD SEPARATOR to new line
+					IFS=$'\n'
+					##############################################################
+
+					# Variable to count the lines being processed
+					count_lines=1
+
+					# Variable to count the stimulus being processed
+					count_stim=1
+
+					# Loop to go through each line of output file
+					for line_raw in `cat ${filename_fullpath}`
+					do
+						# Cleaning the Windows line break into Unix
+						line=`echo ${line_raw} | awk '{ sub(/\r$/,""); print }'`
+
+						# Variable for first item of line processed
+						line_1stitem=`echo ${line} | awk '{print $1}'`
+
+						# Checking the content of the first item for line being processed
+						if [[ ${line_1stitem} = Experiment ]] # Checking if it is the first line
+						then
+							# Variable to mark the type of line being processed
+							previousline_type=initial
+
+						elif [[ ${line_1stitem} = */*/???? ]] # Checking if it is a line initiating with a date
+						then
+							# Extracting the data to variables
+							line_date=`echo ${line} | awk '{print $1}'`
+							line_time=`echo ${line} | awk '{print $2":"$3}' | awk -F":" '{print $1"hr"$2"min"$3"s",$4}'`
+							line_TR=`echo ${line} | awk '{print $4}'`
+							line_stimpresented=no
+							line_stimpresentmode=-
+							counter_stim=-
+							line_stim_1_type=-
+							line_stim_1_intensity=-
+							line_stim_1_duration=-
+							line_stim_2_type=-
+							line_stim_2_intensity=-
+							line_stim_2_duration=-
+
+							# Checking if the previous line was "stimulus". If not, not need to process this line
+							if [ ${previousline_type} = initial ] || [ ${previousline_type} = stimulus ] || [ ${line_TR} = 208 ]
+							then
+								# FUNCTION CALL: function "count_line" to count the lines being processed, and will output them with a single zero padding
+								count_line
+
+								# Outputing to output file
+								echo -e "${filename_modality}:${counter_line}:${counter_stim}:${line_date}:${line_time}:${line_TR}:${line_stimpresented}:${line_stimpresentmode}:${line_stim_1_type}:${line_stim_1_intensity}:${line_stim_1_duration}:${line_stim_2_type}:${line_stim_2_intensity}:${line_stim_2_duration}" >> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+							fi
+
+							# Variable to mark the type of line being processed
+							previousline_type=dated
+							previousline_date=${line_date}
+							previousline_time=${line_time}
+							previousline_TR=${line_TR}
+
+						elif [[ ${line_1stitem} = A ]] # Checking if it is a line initiating with a "A" for auditory
+						then
+							# Extracting the data to variables
+							line_date=${previousline_date}
+							line_time=${previousline_time}
+							line_TR=${previousline_TR}
+							line_stimpresented=yes
+							line_stimpresentmode=simultaneous
+
+							# Outputing to output file
+							if [ ${previousline_type} = dated ] # In this case, this was the first stimulus reported. No need to output yet
+							then
+								line_stim_1_type=auditory
+								line_stim_1_intensity=`echo ${line} | awk -F";" '{print $3}' | awk '{print $NF}'`
+								line_stim_1_duration=`echo ${line} | awk -F";" '{print $2}' | awk '{print $NF}'`
+
+							elif [ ${previousline_type} = stimulus ] # In this case, this was the second stimulus reported. Here it will be counted the line and stimulus being processed, and output altogether with the 1st stimulus reported
+							then
+								# FUNCTION CALL: function "count_stim" to count the stimulus being processed, and will output them with a single zero padding
+								count_stim
+
+								# FUNCTION CALL: function "count_line" to count the lines being processed, and will output them with a single zero padding
+								count_line
+
+								line_stim_2_type=auditory
+								line_stim_2_intensity=`echo ${line} | awk -F";" '{print $3}' | awk '{print $NF}'`
+								line_stim_2_duration=`echo ${line} | awk -F";" '{print $2}' | awk '{print $NF}'`
+
+								# Outputing to output file
+								echo -e "${filename_modality}:${counter_line}:${counter_stim}:${line_date}:${line_time}:${line_TR}:${line_stimpresented}:${line_stimpresentmode}:${line_stim_1_type}:${line_stim_1_intensity}:${line_stim_1_duration}:${line_stim_2_type}:${line_stim_2_intensity}:${line_stim_2_duration}" >> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+
+								previousline_date=-
+								previousline_time=-
+								previousline_TR=-
+							fi
+
+							# Variable to mark the type of line being processed
+							previousline_type=stimulus
+
+						elif [[ ${line_1stitem} = M ]] # Checking if it is a line initiating with a "A" for auditory
+						then
+							# Extracting the data to variables
+							line_date=${previousline_date}
+							line_time=${previousline_time}
+							line_TR=${previousline_TR}
+							line_stimpresented=yes
+							line_stimpresentmode=simultaneous
+
+							# Outputing to output file
+							if [ ${previousline_type} = dated ] # In this case, this was the first stimulus reported. No need to output yet
+							then
+								line_stim_1_type=mechanical
+								line_stim_1_intensity=`echo ${line} | awk -F";" '{print $2}' | awk '{print $NF}'`
+								line_stim_1_duration=`echo ${line} | awk -F";" '{print $1}' | awk '{print $NF}'`
+
+							elif [ ${previousline_type} = stimulus ] # In this case, this was the second stimulus reported. Here it will be counted the line and stimulus being processed, and output altogether with the 1st stimulus reported
+							then
+								# FUNCTION CALL: function "count_stim" to count the stimulus being processed, and will output them with a single zero padding
+								count_stim
+
+								# FUNCTION CALL: function "count_line" to count the lines being processed, and will output them with a single zero padding
+								count_line
+
+								line_stim_2_type=mechanical
+								line_stim_2_intensity=`echo ${line} | awk -F";" '{print $2}' | awk '{print $NF}'`
+								line_stim_2_duration=`echo ${line} | awk -F";" '{print $1}' | awk '{print $NF}'`
+
+								# Outputing to output file
+								echo -e "${filename_modality}:${counter_line}:${counter_stim}:${line_date}:${line_time}:${line_TR}:${line_stimpresented}:${line_stimpresentmode}:${line_stim_1_type}:${line_stim_1_intensity}:${line_stim_1_duration}:${line_stim_2_type}:${line_stim_2_intensity}:${line_stim_2_duration}" >> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+
+								previousline_date=-
+								previousline_time=-
+								previousline_TR=-
+							fi
+
+							# Variable to mark the type of line being processed
+							previousline_type=stimulus
+						fi
+					done
+
+					##############################################################
+					# Changing the *** FIELD SEPARATOR *** back to the default
+					IFS=$OLD_IFS
+					##############################################################
+				fi
+			else
+				# Gathering the file name and path into variables
+				item1_filename=`echo ${item1} | awk -F/ '{print $NF}'`
+				item1_path=`echo ${item1} | sed 's'!/${item1_filename}'!!'`
+
+				echo -e "\n"
+				echo -e "### WARNING: The file being processed for subject ${SUBJ} #### is empty. Please check"
+
+				echo
+				echo -e "File being processed: ${item1_filename}"
+				echo -e "Path for file being processed: ${item1_path}"
+				echo -en "Press any key to continue "
+				read -n1 anykey
+
+				# Creating an empty file named after the file being processed to mark it as empty
+				> ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_${filename_modality}_${counter_file}.txt
+			fi
+		else
+			echo -e "\n"
+			echo -e "### WARNING: There are no psychophys output files for subject ${SUBJ} ####. Please check"
+
+			echo -en "Press any key to continue processing "
+			read -n1 anykey
+		fi
+	done
+
+	# Consolidating all temp files into the final output file for this subject
+	for item in `ls ${temp_folder}/${SUBJ}_stimpresentation_rawoutput_*.txt 2> /dev/null`
+	do
+		# Testing if this is a complete run (= with 208 TRs)
+		if [ -s ${item} ] && [ `tail -1 ${item} | awk -F: '{print $6}'` = 208 ] # Testing if this file has content and if the last line has "208", signaling it was a complete run
+		then
+# 			# Adding this file to the main output file for this subject
+# 			cat $item >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata.txt
+# 			echo -e "\n\n\n" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata.txt
+
+			# Getting the filename with "INCOMPLETE" appended to it into a variable
+			filename_updated=`echo ${item} | awk -F/ '{print $NF}' | sed 's/_rawoutput/_rawoutput_COMPLETE/'`
+
+			# Copying the temporary output file to the subject's folder with updated name
+			cp ${item} ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${filename_updated}
+
+		elif [ -s ${item} ] && [ `tail -1 ${item} | awk -F: '{print $6}'` != 208 ] # Testing if this file has content and TR is DIFFERENT than 208
+		then
+			# Since this is an incomplete run, it will not be added to the main output file and it will be flagged accordingly when moved to the subject's folder
+			# Getting the filename with "INCOMPLETE" appended to it into a variable
+			filename_updated=`echo ${item} | awk -F/ '{print $NF}' | sed 's/_rawoutput/_rawoutput_INCOMPLETE/'`
+
+			# Copying the temporary output file to the subject's folder with updated name
+			cp ${item} ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${filename_updated}
+		else
+			# Since this is an empty file, it will not be added to the main output file and it will be flagged accordingly when moved to the subject's folder
+			# Getting the filename with "INCOMPLETE" appended to it into a variable
+			filename_updated=`echo ${item} | awk -F/ '{print $NF}' | sed 's/_rawoutput/_rawoutput_EMPTY/'`
+
+			# Copying the temporary output file to the subject's folder with updated name
+			cp ${item} ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${filename_updated}
+		fi
+	done
+done
+#################################################################################
+}
+
+function extract_processed_info {
+# This function will extract the  information from the processed psychophys output files into text files
+
+# Extracting the information from the psychophys output files for the subject being processed
+# Giving feedback to the user
+echo -e "\n"
+echo -e "Extracting the information from the processed psychophysical software output files"
+
+# Loop for processing each subject
+for SUBJ in ${SUBJLIST}
+do
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Processing subject \"${SUBJ}\" "
+
+	# Consolidating all temp files into the final output file for this subject
+	# First creating a variable to hold all files to be processed
+	subj_files_list=`ls ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_rawoutput_COMPLETE_*.txt 2> /dev/null` # Note that the use of the subject's ID in the beginning will not consider the files that start with "INVALID-RUN"
+
+	# Checking if the variable is not empty
+	if [ -n "${subj_files_list}" ]
+	then
+		#################################################################################
+		# Creating a file to hold the output of this script for this subject
+		echo -e "### subject ${SUBJ} ###" > ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata_VALID-FUNC-RUNS_EXCEL-export.txt
+
+		echo -e "Data extraction for processed psychophysical software output files after QA control check in 09/19/2013 for" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata_VALID-FUNC-RUNS_EXCEL-export.txt
+
+		echo -e "This script extracted data ONLY from: 1.\"rawoutput\" files created from the extracted data from the original psychophys files that are related to VALID functional BOLD runs" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata_VALID-FUNC-RUNS_EXCEL-export.txt
+
+		echo -e "Processing started at `current_date_time 2`" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata_VALID-FUNC-RUNS_EXCEL-export.txt
+
+		# Adding headers to the output file
+		echo -e "Output file stimulus:Event count:Stim count:Date:Time:TR:Stimulus presented (yes/no):Stimulus present mode (single/simult):Stim1 type:Stim1 intensity(%):Stim1 Duration:Stim2 type:Stim2 intensity(%):Stim2 Duration" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata_VALID-FUNC-RUNS_EXCEL-export.txt
+		#################################################################################
+
+		for item in ${subj_files_list}
+		do
+			# Adding this file to the main output file for this subject
+			cat $item >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata_VALID-FUNC-RUNS_EXCEL-export.txt
+			echo -e "\n\n\n" >> ${subjs_mainfolder}/${SUBJ}/${psychophys_folder}/${SUBJ}_stimpresentation_extracteddata_VALID-FUNC-RUNS_EXCEL-export.txt
+		done
+	else
+		echo -e "\n"
+		echo -e "### No files named \"${SUBJ}_stimpresentation_rawoutput_COMPLETE_*.txt\" were found! ###"
+	fi
+done
+#################################################################################
+}
+
+################ VARIABLES TO BE USED IN THIS SCRIPT #################
+# Variable for the folder within "/tmp" for temporary files
+temp_folder=/tmp/ppss_tempdir_TEMP
+
+# Variable with the basename for the file holding the commands for PPSS processing
+ppss_command_file=ppss_processing_file.txt
+
+# Variable with main outputfile name
+output_mainfile=QA_stimIntensity.txt
+
+# Main folder holding subject's folders
+subjs_mainfolder=/Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/subjs
+# subjs_mainfolder=/Users/moanae/mri_testing/subjs
+
+# psychophys folder within subject's folder
+psychophys_folder=psychophys_software_output
+
+# psychophys folder raw_data within subject's folder
+psychophys_folder_rawdata=psychophys_software_output/raw_data
+
+SUBJLIST="FM0001_20121203 FM0007_20130415 FM0097_20121011 FM0530_20121114 FM0608_20120501 FM0663_20120402 FM0757_20120404 FM0761_20120225 FM0765_20120508 FM0770_20120801 FM0785_20120430 FM0796_20120822 FM0797_20120424 FM0804_20120820 FM0826_20120802 FM0833_20120328 FM0867_20120920 FM1071_20121130 FM2001_20120926 FM2162_20120629 FM2382_20121010 FM2383_20121212 FM2388_20121023 FM2439_20130116 FM2443_20130115 FM2451_20130128 FM2465_20130214 FM2473_20130213 FM2474_20130219 FM2526_20130402 HC0002_20121214 HC0003_20130110 HC0068_20120918 HC0102_20121003 HC0182_20120620 HC0229_20120227 HC0249_20120312 HC0267_20111214 HC0287_20120726 HC0293_20120626 HC0303_20111219 HC0308_20120814 HC0436_20120206 HC0436_20120220 HC0560_20120618 HC0588_20120128 HC0610_20120808 HC0782_20120725 HC0813_20120702 HC2054_20121026 HC2062_20130328 HC2105_20121217 HC2106_20121120 HC2128_20121107 HC2246_20111119 HC2277_20121101 HC2284_20121109 HC2422_20121129 HC2436_20121220 HC2501_20130305 HC2515_20130320"
+
+# SUBJLIST="FM0001_20121203 FM0663_20120402 HC0002_20121214"
+
+modality_list="Auditory Intermingled Mech Simultaneous"
+######################################################################
+
+clear
+
+cd /tmp
+
+# Removing all temporary fsf templates and their temp folder within "/tmp" that might be present from previously aborted processing
+rm -rf ${temp_folder} 2> /dev/null
+
+# Creating the temp folder
+mkdir ${temp_folder} 2> /dev/null
+
+# Allowing the user to choose the processing to be done
+echo
+echo -e "Please choose from the below options:"
+echo -e "1. Extract raw data from raw psychophys output files for each subject"
+echo -e "2. Extract  data from processed psychophys output text files for each subject"
+
+echo
+echo -en "Please enter your option here: "
+read processing_option
+
+echo
+echo -e "Start processing time: `current_date_time 2`"
+
+# checking the user's entered option
+if [ ${processing_option} = 1 ]
+then
+	# FUNCTION CALL: function "extract_raw_info" to extract the information from the raw psychophys output files into text files
+	extract_raw_info
+
+elif [ ${processing_option} = 2 ]
+then
+	# FUNCTION CALL: function "extract_processed_info" to extract the  information from the processed psychophys output files into text files
+	extract_processed_info
+else
+	echo
+	echo -e "No valid option entered - exiting"
+
+	sleep 2
+
+	exit
+fi
+
+echo
+echo -e "\nDone"
+
+echo
+echo -e "Finish processing time: `current_date_time 2`"
+
+echo
+echo -en "Press any key to delete the temporary files "
+read -n1 anykey
+
+rm -rf ${temp_folder}
+exit

@@ -1,0 +1,560 @@
+#! /bin/bash
+
+# Does registration and spatial normalization processing by DTI-TK#
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function dtitk_mainfolder {
+# This function will check the path to the dtitk main folder as well as the existence of a text file holding the the subjects files list to be processed
+
+# It uses 1 parameter:
+	# 1. Flag if it is being called for preprocessing or for copying files
+
+# The "local" before the variable ensure that the variable is limited only to within this function
+local subjs_file="$1"
+
+# Asking the user to confirm or enter a new folder name for the folder holding the dtifit output files for each subject
+while [ 1 ]
+do
+	echo
+	echo -e "The folder name holding the dtitk pre-processed files is currently entered as: ${dwi_dtitk_foldername}"
+	
+	# Asking for the user's input
+	echo
+	echo -en "Do you want to: (1) Keep the name as is; or (2) enter a new name: "
+	read dtifit_foldername
+
+	# Checking user's answer and asking for confirmation
+	if [ ${dtifit_foldername} = 1 ]
+	then
+		echo -en "Keeping the dtifit output files folder name as: \"${dwi_dtitk_foldername}\" "
+	
+		sleep 2
+
+		break
+
+	elif [ ${dtifit_foldername} = 2 ]
+	then
+		echo
+		# Checking which option is calling this function
+		echo -en "Please enter a new folder name: "
+		read dwi_dtitk_foldername
+
+		# Giving feedback to the user
+		echo
+		echo -en "dtifit pre-processed files folder name entered as: \"${dwi_dtitk_foldername}\" "
+		
+		sleep 2
+
+		echo
+		break
+	fi
+done
+
+# Loop to check if the dtitk main folder exists in the provided path
+while [ 1 ]
+do
+	# Checking if the above folder exists for the subject being processed
+	if [ -d ${dwi_mainfolder_path}/${dwi_dtitk_foldername} ]
+	then
+		# Giving feedback to the user
+		echo -e "\n"
+		echo -en "Main DTI-TK folder exists "
+		
+		# Storing the full path for the "subjs.txt" file that lists all filesto be processed into a variable
+		# Checking which file will be used according to the calling script
+		if [ ${subjs_file} = subjs ]
+		then
+			dtitk_subjsfileslist=`ls ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/subjs.txt 2> /dev/null`
+		elif [ ${subjs_file} = subjs_aff ]
+		then
+			dtitk_subjsfileslist=`ls ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/subjs_aff.txt 2> /dev/null`
+		fi
+		
+		break
+	else
+		# Warning the user that the folder does not exists
+		echo
+		echo -en "\n*** This folder does not exists within this path: ${dwi_mainfolder_path} *** "
+		
+		sleep 2
+		
+		echo
+		echo -e "You will need to enter below the proper dtitk main folder name holding the subject's pre-processed DTI files"
+
+		echo
+		echo -en "Please enter a new folder name: "
+		read dwi_dtitk_foldername
+	fi
+done
+}
+
+function dtitk_bootstraptemplate {
+# This function will do bootstraping of an intial DTI template from the subject's DTI pre-processed volumes
+
+# Checking if the "subjs.txt" file exists
+if [ -z "${dtitk_subjsfileslist}" ] # Checking if this variable is zero in length
+then
+	dtitk_subjsfileslist=none
+else
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "\"subjs.txt\" file exists "
+	
+	sleep 2
+fi
+
+# Asking the user to enter the path to the template to be used for registration
+echo -e "\n"
+echo -e "An existing tensor template must be available for processing. One that serves this purpose is the one distributed by DTI-TK named \"IXI aging template\"."
+
+while [ 1 ]
+do
+	echo -en "Please enter the fullpath to the tensor template file: "
+	read tensor_template_fullpath
+	
+	# Checking if the tensor template file exists and it is a file
+	if [ -f ${tensor_template_fullpath} ]
+	then
+		# Giving feedback to the user
+		echo
+		echo -en "Tensor template file \"`echo ${tensor_template_fullpath} | awk -F/ '{print $NF}'`\" exists "
+		
+		sleep 2
+		
+		break
+	else
+		# Giving feedback to the user
+		echo
+		echo -e "Did not find a tensor template file in the provided path. Please enter a valid path "
+		
+		sleep 2
+	fi
+done
+
+
+# This will see if the "subjs.txt" files is missing
+if [ "${dtitk_subjsfileslist}" != none ] # If this variable is equal to "none", it means that it is empty
+then
+	#####################################
+	# Using the "dti_template_bootstrap" tool to bootstrap an initial DTI template
+	# Putting the full command into a variable
+	command_processing=`echo -e "cd ${dwi_mainfolder_path}/${dwi_dtitk_foldername}; dti_template_bootstrap ${tensor_template_fullpath} ${dtitk_subjsfileslist} &> LOGFILE_reg-spatialnorm_step1_bootstrap-initial-template_OUTPUT.txt"`
+	
+	# Adding the command to the ppss processing text file
+	echo "${command_processing}" >> ${temp_folder}/${ppss_command_file}
+
+	##### Creating a LOG file with the commands used for later QA if needed #####
+	echo "OS name and version: ${os_nameandversion}; Command: dti_template_bootstrap; DTI-TK version: `echo ${DTITK_ROOT} | awk -F/ '{print $NF}'`; Date and time: `current_date_time 2`" > ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step1_bootstrap-initial-template_COMMAND-USED.txt
+
+	echo -e "Command \"dti_template_bootstrap\" to bootstrap an intial DTI template from the subject's pre-processed DTI volumes" >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step1_bootstrap-initial-template_COMMAND-USED.txt
+
+	echo -e "\n${command_processing}" >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step1_bootstrap-initial-template_COMMAND-USED.txt
+	#####################################
+else
+	echo -e "\n"
+	echo -e "##### The \"subjs.txt\" file needed for \"dti_template_bootstrap\" was not found #####"
+	echo -e "No processing was done. Please check the path entered to that file"
+fi
+}
+
+function dtitk_affine_alignment {
+# This function will proceed with affine alignment of DTI volumes with template refinement
+
+# Checking if the "subjs.txt" file exists
+if [ -z "${dtitk_subjsfileslist}" ] # Checking if this variable is zero in length
+then
+	dtitk_subjsfileslist=none
+else
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "\"subjs.txt\" file exists "
+	
+	sleep 2
+fi
+
+# Checking if the file "mean_initial.nii.gz" is present in the dtitk main folder (created by bootstrapping of initial DTI volumes)
+# Creating a variable to hold the full path to the initial template
+initial_template_fullpath=${dwi_mainfolder_path}/${dwi_dtitk_foldername}/mean_initial.nii.gz
+
+if [ -f ${initial_template_fullpath} ]
+then
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Initial DTI template named \"mean_initial.nii.gz\" exists. Continuing processing..."
+	
+	sleep 2
+
+	# This will see if the "subjs.txt" files is missing
+	if [ "${dtitk_subjsfileslist}" != none ] # If this variable is equal to "none", it means that it is empty
+	then
+		#####################################
+		# Using the "dti_affine_population" tool to proceed with affine alignment with template refinement
+		# Putting the full command into a variable
+		command_processing=`echo -e "cd ${dwi_mainfolder_path}/${dwi_dtitk_foldername}; dti_affine_population ${initial_template_fullpath} ${dtitk_subjsfileslist} EDS 3 &> LOGFILE_reg-spatialnorm_step2_affine-alignment_OUTPUT.txt"`
+		
+		# Adding the command to the ppss processing text file
+		echo "${command_processing}" >> ${temp_folder}/${ppss_command_file}
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: dti_affine_population; DTI-TK version: `echo ${DTITK_ROOT} | awk -F/ '{print $NF}'`; Date and time: `current_date_time 2`" > ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step2_affine-alignment_COMMAND-USED.txt
+
+		echo -e "Command \"dti_affine_population\" to proceed with afine alignment of DTI volumes with template refinement. Three iterations for optimization used." >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step2_affine-alignment_COMMAND-USED.txt
+
+		echo -e "\n${command_processing}" >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step2_affine-alignment_COMMAND-USED.txt
+		#####################################
+	else
+		echo -e "\n"
+		echo -e "##### The \"subjs.txt\" file needed for \"dti_affine_population\" was not found #####"
+		echo -e "No processing was done. Please check the path entered to that file"
+	fi
+else
+	# Giving feedback to the user
+	echo
+	echo -e "Did not find an initial DTI template file named \"mean_initial.nii.gz\" in this path: \"${dwi_mainfolder_path}/${dwi_dtitk_foldername}\". This file is required for processing "
+	
+	sleep 2
+fi
+}
+
+function dtitk_deformable_alignment {
+# This function will proceed with affine alignment of DTI volumes with template refinement
+
+# Checking if the "subjs.txt" file exists
+if [ -z "${dtitk_subjsfileslist}" ] # Checking if this variable is zero in length
+then
+	dtitk_subjsfileslist=none
+else
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "\"subjs_aff.txt\" file exists "
+	
+	sleep 2
+fi
+
+# Checking if the file "mean_affine3.nii.gz" is present in the dtitk main folder (created by affine alignment of DTI volumes. It assumes 3 iterations - ##### NEED TO MAKE THE CODE BELOW FLEXIBLE SO IF MORE OR LESS ITERATIONS WERE DONE IT CAN FIND THE FILE REPRESENTING THE LAST ITERATION DONE ####)
+
+# Variable to hold the full path to the affine aligned file
+affine_aligned_template_fullpath=${dwi_mainfolder_path}/${dwi_dtitk_foldername}/mean_affine3.nii.gz
+
+# Variable to hold the full path to the trace image of the affine aligned file (to be created below)
+affine_aligned_template_trace_fullpath=${dwi_mainfolder_path}/${dwi_dtitk_foldername}/mean_affine3_tr.nii.gz
+
+# Variable to hold the full path to the temporary mask file (before internal holes filling, to be created below) aligned file
+mask_template_fullpath_temp=${dwi_mainfolder_path}/${dwi_dtitk_foldername}/mask_temp.nii.gz
+
+# Variable to hold the full path to the mask file (to be created below) aligned file
+mask_template_fullpath=${dwi_mainfolder_path}/${dwi_dtitk_foldername}/mask.nii.gz
+
+if [ -f ${affine_aligned_template_fullpath} ]
+then
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Afine aligned DTI template named \"mean_affine3.nii.gz\" exists. Continuing processing..."
+	
+	sleep 2
+	
+	# Creating a mask
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Creating a mask from the affine aligned template..."
+	
+	# Commands to generate the mask file
+	# Step 1: Computing the trace map of the template image
+	TVtool -in ${affine_aligned_template_fullpath} -tr &> /dev/null
+	
+	# Step 2: Binary thresholding the trace image to generate a temporary mask image (before filling any potential internal holes)
+	BinaryThresholdImageFilter ${affine_aligned_template_trace_fullpath} ${mask_template_fullpath_temp} 0.01 100 1 0 &> /dev/null
+	
+	# Step 3: Making sure that any internal holes within the mask are filling (uses fslmaths option "-fillh")
+	fslmaths ${mask_template_fullpath_temp} -fillh ${mask_template_fullpath}
+	
+	# Asking the user to check the mask created before proceeding
+	echo -e "\n"
+	echo -e "*** Please check NOW the mask generated for quality control, before proceeding with the deformable alignment ***"
+	echo -e "Full path to the mask file: ${mask_template_fullpath}"
+	
+	echo
+	echo -en "Press any key to proceed with the deformable alignment "
+	read -n1 anykey
+	
+	# Removing the temporary mask file
+	rm ${mask_template_fullpath_temp}
+	
+	# This will see if the "subjs.txt" files is missing
+	if [ "${dtitk_subjsfileslist}" != none ] # If this variable is equal to "none", it means that it is empty
+	then
+		#####################################
+		# Using the "dti_diffeomorphic_population" to proceed with the deformable alignment with template refinement
+		# Putting the full command into a variable
+		command_processing=`echo -e "cd ${dwi_mainfolder_path}/${dwi_dtitk_foldername}; dti_diffeomorphic_population ${affine_aligned_template_fullpath} ${dtitk_subjsfileslist} ${mask_template_fullpath} 0.002 &> LOGFILE_reg-spatialnorm_step3_deformable-alignment_OUTPUT.txt"`
+		
+		# Adding the command to the ppss processing text file
+		echo "${command_processing}" >> ${temp_folder}/${ppss_command_file}
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: dti_diffeomorphic_population; DTI-TK version: `echo ${DTITK_ROOT} | awk -F/ '{print $NF}'`; Date and time: `current_date_time 2`" > ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step3_deformable-alignment_COMMAND-USED.txt
+
+		# Adding the commands used above to create the mask file to the LOG file
+		echo -e "\nCommands used to create a mask from the affine aligned template." >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step3_deformable-alignment_COMMAND-USED.txt
+		
+		echo -e "\n1. TVtool -in ${affine_aligned_template_fullpath} -tr &> /dev/null\n2. BinaryThresholdImageFilter ${affine_aligned_template_trace_fullpath} ${mask_template_fullpath_temp} 0.01 100 1 0 &> /dev/null\n3. fslmaths ${mask_template_fullpath_temp} -fillh ${mask_template_fullpath}" >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step3_deformable-alignment_COMMAND-USED.txt
+		
+		echo -e "\nCommand \"dti_diffeomorphic_population\" to proceed with deformable alignment of DTI volumes." >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step3_deformable-alignment_COMMAND-USED.txt
+
+		echo -e "\n${command_processing}" >> ${dwi_mainfolder_path}/${dwi_dtitk_foldername}/LOGFILE_reg-spatialnorm_step3_deformable-alignment_COMMAND-USED.txt
+		#####################################
+	else
+		echo -e "\n"
+		echo -e "##### The \"subjs_aff.txt\" file needed for \"dti_diffeomorphic_population\" was not found #####"
+		echo -e "No processing was done. Please check the path entered to that file"
+	fi
+else
+	# Giving feedback to the user
+	echo
+	echo -e "Did not find an initial DTI template file named \"mean_initial.nii.gz\" in this path: \"${dwi_mainfolder_path}/${dwi_dtitk_foldername}\". This file is required for processing "
+	
+	sleep 2
+fi
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_dtitk_reg-spatial-norm # Where the temporary files will be held
+ppss_command_file=dtitk_files_list_reg-spatial-norm.txt
+
+dwi_mainfolder_path=${FULLPATH} # Where the DWI files are. Can be modified by the user in this script.
+dwi_dtitk_foldername=dtitk_mainfolder # The folder name where the output files of dtifit are located (this may be changed later by the user)
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+clear
+
+# Changing directory to /tmp in case the script commits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+echo -e "This program will process registration and spatial normalization using DTI-TK"
+echo -e "It will use several tools from DTI-TK toolkit\n"
+
+echo -e "#######################################################"
+echo -e "*** IMPORTANT - this program makes one assumption:"
+echo -e "1. You have pre-processed your files with DTI-TK, and they are saved in a single folder along with a text file listing the subjects to be processed."
+echo -e "#######################################################"
+
+##### GATHERING THE PATH TO THE ANALYSIS FOLDER #####
+# FUNCTION CALL: calls the function "analysis_mainfolder" in "mainscrcall_funclib" to allow the user to select the path to the subject's folders
+analysis_mainfolder DWI
+
+# Assigning the output variable from the function above to a local variable
+dwi_mainfolder_path=${ANALYSIS_MAINFOLDER_PATH}
+######################################################
+
+# MAIN MENU
+echo
+echo -e "Please choose which step to proceed:"
+echo -e "\t1. Bootstrap the initial DTI template from subject dti volumes"
+echo -e "\t2. Affine alignment of DTI volumes with template refinement"
+echo -e "\t3. Deformable alignment of DTI volumes with template refinement"
+echo -e "\t0. Back to main menu\n"
+
+echo -en "Please enter your option: "
+read dwifit_process_steps
+
+# Ask for user input to continue
+while [ 1 ]
+do
+	case ${dwifit_process_steps} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+
+		sleep 2
+
+		exit
+		;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer, DTI-TK) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrall_dwi_dtitk_reg-spatial-norm:Bootstrap of initial DTI template from subject's individual DTI volumes" DTI-TK "(dtitk_bootstraptemplate) dti_template_bootstrap"
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "This script will bootstrap the initial DTI templates from each subject's DTI volume"
+
+		# Warning the user about the script assumptions
+		echo
+		echo -e "*** Please note that this script expects the pre-processed DTI-TK DTI volumes in a single folder for each subject, as well as a text file named \"subjs.txt\" with the files to be processed ***"
+		echo -e "If not it will generate an error"
+		echo -en "Press any key to continue "
+		read anykey
+
+		# FUNCTION CALL: Calls the function "dtitk_mainfolder" to confirm dtitk main folder
+		dtitk_mainfolder subjs
+
+		# FUNCTION CALL: Calls the function "dtitk_bootstraptemplate" to proceed with dtitk bootstrapping of initial DTI template
+		dtitk_bootstraptemplate
+
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+			# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+			echo -e "\n"
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		# Warning the user to visually inspect the template generated before proceeding
+		echo
+		echo -e "*** Please do a visual check the initial template created for quality control before proceeding with affine alignment ***"
+		
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	2)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer, DTI-TK) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrall_dwi_dtitk_reg-spatial-norm:Affine alignment of DTI volumes with template refinement" DTI-TK "(dtitk_affine_alignment) dti_affine_population"
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "This script will proceed with afine alignment of DTI volumes with template refinement"
+
+		# Warning the user about the script assumptions
+		echo
+		echo -e "*** Please note that this script expects the pre-processed DTI-TK DTI volumes in a single folder for each subject, as well as a text file named \"subjs.txt\" with the files to be processed ***"
+		echo -e "If not it will generate an error"
+		echo -en "Press any key to continue "
+		read anykey
+
+		# FUNCTION CALL: Calls the function "dtitk_mainfolder" to confirm dtitk main folder
+		dtitk_mainfolder subjs
+		
+		# FUNCTION CALL: Calls the function "dtitk_affine_alignment" to proceed with afine alignment of DTI volumes with template refinement
+		dtitk_affine_alignment
+
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+			# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+			echo -e "\n"
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	3)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "mainscrcall_funclib" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer, DTI-TK) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrall_dwi_dtitk_reg-spatial-norm:Deformable alignment of DTI volumes" DTI-TK "(dtitk_deformable_alignment) dti_diffeomorphic_population"
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "This script will proceed with Deformable alignment of DTI volumes"
+
+		# Warning the user about the script assumptions
+		echo
+		echo -e "*** Please note that this script expects the affine aligned DTI-TK DTI volumes in a single folder for each subject, as well as a text file named \"subjs.txt\" with the files to be processed ***"
+		echo -e "If not it will generate an error"
+		echo -en "Press any key to continue "
+		read anykey
+
+		# FUNCTION CALL: Calls the function "dtitk_mainfolder" to confirm dtitk main folder
+		dtitk_mainfolder subjs_aff
+		
+		# FUNCTION CALL: Calls the function "dtitk_deformable_alignment" to proceed with deformable alignment of DTI volumes
+		dtitk_deformable_alignment
+		
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+			# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+			echo -e "\n"
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		break
+		;;
+	*)
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+# Removing temporary folders and files created
+rm -r ${temp_folder} 2> /dev/null

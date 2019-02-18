@@ -1,0 +1,67 @@
+#! /bin/bash
+
+clear
+
+echo -en "Processing..."
+
+# Command
+echo "Count psychophys files:SubjID:SubjID match with that in filename:Scandate match with that in filename:Date in file name:Time in file name:Psychophys output file name" > /Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/QA_mri_files/psychophys_stimpresentation/psychophys_outputfiles_count2.txt
+
+for item in `ls`
+do
+	count_files=1
+
+	subj_scandate=`echo ${item} | awk -F_ '{print $2}'`
+
+	output_files=`ls ${item}/psychophys_software_output/raw_data/*.txt | awk -F/ '{print $NF}'`
+
+	for item2 in ${output_files}
+	do
+		counter_files=`printf "%02d" ${count_files}`
+
+		filename_date_dayyear=`echo ${item2} | awk -F_ '{print $(NF-2)}' | awk -F"-" '{print $2"-"$3}'`
+
+		filename_date_monthnumber=`echo ${item2} | awk -F_ '{print $(NF-2)}' | awk -F- '{print $1}'`
+
+		count_month=1
+
+		month_list="JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC"
+
+		for month in ${month_list}
+		do
+			if [ ${filename_date_monthnumber} = ${count_month} ]
+			then
+				filename_date_monthname=${month}
+
+				break
+			else
+				((count_month++))
+			fi
+		done
+
+		filename_date=`gdate -d "${filename_date_monthname}-${filename_date_dayyear}" +%Y%m%d`
+
+		filename_time=`echo ${item2} | awk -F_ '{print $(NF-1),$NF}' | sed 's/.txt//'`
+
+		subjID_file=`echo ${item2} | awk -F_ '{print $1"_"$2}'`
+
+		if [ ${item} = ${subjID_file} ]
+		then
+			ID_match=MATCH
+		else
+			ID_match=DIFFER
+		fi
+
+		if [ ${subj_scandate} = ${filename_date} ]
+		then
+			scandate_match=MATCH
+		else
+			scandate_match=DIFFER
+		fi
+
+		echo -e "${counter_files}:${item}:${ID_match}:${scandate_match}:${filename_date}:${filename_time}:${item2}" >> /Volumes/DroboPro/project_FM_Gracely/data_analysis_mri/study_data/QA_mri_files/psychophys_stimpresentation/psychophys_outputfiles_count2.txt
+		((count_files++))
+	done
+done
+
+echo

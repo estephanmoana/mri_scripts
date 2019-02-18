@@ -1,0 +1,428 @@
+#! /bin/bash
+
+# Script to do bedpostx: It creates all the files necessary for running probabilistic tractography
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function bedpostx_process_HCP {
+# This function will check if all files needed for bedpostx are available for each subject
+# If it find all files, it will then call "bedpostx" to runs Markov Chain Monte Carlo sampling to build up distributions on diffusion parameters at each voxel,and create all the files necessary for running probabilistic tractography
+
+# Giving feedback to the user
+echo
+echo -en "Generating the commands to be used for processing "
+
+for SUBJ in ${SUBJLIST}
+do
+	# Checking if all needed files for bedpostx are available
+	DWI_file=`ls ${dwi_mainfolder_path}/${SUBJ}/dMRI/T1w/Diffusion/data.nii.gz 2> /dev/null`
+	nodiff_brain_mask_file=`ls ${dwi_mainfolder_path}/${SUBJ}/dMRI/T1w/Diffusion/nodif_brain_mask.nii.gz 2> /dev/null`
+	bvecs_file=`ls ${dwi_mainfolder_path}/${SUBJ}/dMRI/T1w/Diffusion/bvecs 2> /dev/null`
+	bvals_file=`ls ${dwi_mainfolder_path}/${SUBJ}/dMRI/T1w/Diffusion/bvals 2> /dev/null`
+
+	if [ -z "${DWI_file_temp}" ] # Checking if this variable is zero in length
+	then
+		DWI_file_temp=none
+
+	elif [ -z "${nodiff_brain_mask_file}" ] # Checking if this variable is zero in length
+	then
+		nodiff_brain_mask_file=none
+
+	elif [ -z "${bvecs_file}" ] # Checking if this variable is zero in length
+	then
+		bvecs_file=none
+
+	elif [ -z "${bvals_file}" ] # Checking if this variable is zero in length
+	then
+		bvals_file=none
+	fi
+
+	# This will see if any of the needed files for dtifit are missing
+	if [ "${DWI_file}" != none ] && [ "${nodiff_brain_mask_file}" != none ] && [ "${bvecs_file}" != none ] && [ "${bvals_file}" != none ] # If any of these variables is equal to "none", it means that they are empty
+	then
+		# Gathering the DWI directory name into a variable
+		DWI_folder_path=${dwi_mainfolder_path}/${SUBJ}/dMRI/T1w/Diffusion
+		
+		# Gathering the DTI file name into a variable
+		dwi_filename=`echo ${DWI_file} | awk -F/ '{print $NF}'`
+
+		#####################################
+		# Using the bedpostx tool to prepare the files needed to proceed with tractography.
+		# Putting the full command into a variable
+		command_processing=`echo -e "bedpostx ${DWI_folder_path} -n 3 -model 2 -g —rician 1> ${DWI_folder_path}/LOGFILE_${SUBJ}_bedpostx_stdout.txt 2> ${DWI_folder_path}/LOGFILE_${SUBJ}_bedpostx_stderr.txt"`
+		
+		# Adding the command to the ppss processing text file
+		echo "${command_processing}" >> ${temp_folder}/${ppss_command_file}
+
+		##### Creating a LOG file with the commands used for later QA if needed #####
+		echo "OS name and version: ${os_nameandversion}; Command: bedpostx; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${DWI_folder_path}/LOGFILE_prepare-files-tractography_bedpostx_${dwi_filename}.txt
+
+		echo -e "Command \"bedpostx\" to create all the files necessary for running probabilistic tractography" >> ${DWI_folder_path}/LOGFILE_prepare-files-tractography_bedpostx_${dwi_filename}.txt
+
+		echo -e "\n${command_processing}" >> ${DWI_folder_path}/LOGFILE_prepare-files-tractography_bedpostx_${dwi_filename}.txt
+		#####################################
+
+		# Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+		subj_process="${subj_process} ${SUBJ}"
+	else
+		echo -e "\n"
+		echo -e "##### One of the necessary files for \"bedpostx\" was not found for subject \"$SUBJ\" #####"
+		echo -e "Please check the DWI folder for this subject"
+		echo -e "Skipping this subject for \"bedpostx\" processing\n"
+
+		echo -en "Press any key to continue "
+		read -n1 anykey
+
+		# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+		subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+	fi
+done
+}
+
+function bedpostx_process_nonHCP {
+# This function will check if all files needed for bedpostx are available for each subject
+# If it find all files, it will then call "bedpostx" to runs Markov Chain Monte Carlo sampling to build up distributions on diffusion parameters at each voxel,and create all the files necessary for running probabilistic tractography
+
+for SUBJ in ${SUBJLIST}
+do
+	# Checking if all needed files for bedpostx are available
+	DWI_file_temp=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${dwi_filename}.nii.gz 2> /dev/null`
+	nodiff_brain_mask_file=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${dwi_nodiff_outputfile}_brain_mask.nii.gz 2> /dev/null`
+	bvecs_file=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${bvecs_filename} 2> /dev/null`
+	bvals_file=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${bvals_filename} 2> /dev/null`
+
+	# Checking if an original bvecs file is present, which indicates that the bvecs file was rotated after eddy current correction
+	bvecs_ORIG_file=`ls ${dwi_mainfolder_path}/${SUBJ}/${dwi_subject_subfolder}/${bvecs_filename}_ORIG 2> /dev/null`
+
+	if [ -z "${bvecs_ORIG_file}" ] # Checking if the "bvecs_ORIG" variable is zero in length, meaning the file does not exist
+	then
+		echo
+		echo -e "#### WARNING ####"
+		echo -e "No original bvecs files was found for this subject, which may indicate that the bvecs file was not rotated following eddy current correction\n"
+
+		echo -e "Do you want to:"
+		echo -e "1. Skip this subject"
+		echo -e "2. Continue processing anyway\n"
+
+		echo -en "Enter option here: "
+		read process_no_bvecs_rotation
+	else
+		# In this case the "bvecs_ORIG" file exists thus processing shall continue
+		process_no_bvecs_rotation=2
+	fi
+
+	if [ -z "${DWI_file_temp}" ] # Checking if this variable is zero in length
+	then
+		DWI_file_temp=none
+
+	elif [ -z "${nodiff_brain_mask_file}" ] # Checking if this variable is zero in length
+	then
+		nodiff_brain_mask_file=none
+
+	elif [ -z "${bvecs_file}" ] # Checking if this variable is zero in length
+	then
+		bvecs_file=none
+
+	elif [ -z "${bvals_file}" ] # Checking if this variable is zero in length
+	then
+		bvals_file=none
+	fi
+
+	# This will see if any of the needed files for dtifit are missing
+	if [ "${DWI_file_temp}" != none ] && [ "${nodiff_brain_mask_file}" != none ] && [ "${bvecs_file}" != none ] && [ "${bvals_file}" != none ] # IF any of these variables is equal to "none", it means that they are empty
+	then
+		if [ -n "${process_no_bvecs_rotation}" ] && [ "${process_no_bvecs_rotation}" = 2 ] # Checking if this variable is not empty AND its value is equal to "2"
+		then
+			# Gathering the DWI directory name into a variable
+			DWI_folder_path=`echo ${DWI_file_temp} | sed 's!'/${dwi_filename}.nii.gz'!!'`
+
+			# Giving feedback to the user
+			echo
+			echo -en "Copying and renaming the DWI image file for subject *** ${SUBJ} *** to fit \"bedpostx\" expectations "
+
+			# Making a copy of the DWI image file (either post eddy current corrected OR distortion corrected), and renaming it "data.nii.gz", as bedpostx does not give an option to enter another name for the DWI file, and it expects this specific naming
+			# Creating a variable with the new name
+			DWI_file=${DWI_folder_path}/data.nii.gz
+
+			# Command to copy
+			cp ${DWI_file_temp} ${DWI_file}
+
+			#####################################
+			# Using the bedpostx tool to prepare the files needed to proceed with tractography.
+			# Putting the full command into a variable
+			command_processing=`echo -e "bedpostx ${DWI_folder_path} 1> ${DWI_folder_path}/LOGFILE_${SUBJ}_bedpostx_stdout.txt 2> ${DWI_folder_path}/LOGFILE_${SUBJ}_bedpostx_stderr.txt"`
+			
+			# Adding the command to the ppss processing text file
+			echo "${command_processing}" >> ${temp_folder}/${ppss_command_file}
+
+			##### Creating a LOG file with the commands used for later QA if needed #####
+			echo "OS name and version: ${os_nameandversion}; Command: bedpostx; FSL `cat $FSLDIR/etc/fslversion`; Date and time: `current_date_time 2`" > ${DWI_folder_path}/LOGFILE_prepare-files-tractography_bedpostx_${dwi_filename}.txt
+
+			echo -e "Command \"bedpostx\" to create all the files necessary for running probabilistic tractography" >> ${DWI_folder_path}/LOGFILE_prepare-files-tractography_bedpostx_${dwi_filename}.txt
+
+			echo -e "\n${command_processing}" >> ${DWI_folder_path}/LOGFILE_prepare-files-tractography_bedpostx_${dwi_filename}.txt
+			#####################################
+
+			# Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+			subj_process="${subj_process} ${SUBJ}"
+
+		elif [ -n "${process_no_bvecs_rotation}" ] && [ "${process_no_bvecs_rotation}" = 1 ]
+		then
+			echo
+			echo -e "Skipping this subject as no rotated bvecs file was found for it"
+
+			# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+			subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+		fi
+	else
+		echo -e "\n"
+		echo -e "##### One of the necessary files for \"bedpostx\" was not found for subject \"$SUBJ\" #####"
+		echo -e "Please check the DWI folder for this subject"
+		echo -e "Skipping this subject for \"bedpostx\" processing\n"
+
+		echo -en "Press any key to continue "
+		read -n1 anykey
+
+		# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+		subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+	fi
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_bedpostx # Where the temporary files will be held
+ppss_command_file=bedpostx_files_list.txt
+
+dwi_mainfolder_path=${SUBJS_FOLDERS_PATH} # Where the DWI files are. Can be modified by the user in this script.
+dwi_subject_subfolder=DWI/DWI_* # To be used with "ls" command: The path to the subfolder within each subject's folder
+dwi_filename=data_DWI01_edccorr # The DWI file name for the file to be processed here (if no distortion corrected was done - this may be changed later by the user)
+bvecs_filename=bvecs # Name of the bvecs file
+bvals_filename=bvals # Name of the bvecs file
+dwi_nodiff_outputfile=nodif # The output file name
+######################################################################
+
+######### Script Main menu - Informing the user what this script does and asking for input #########
+clear
+
+# Changing directory to /tmp in case the script commits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+echo -e "This script will use the FSL tool \"bedpostx\", which runs Markov Chain Monte Carlo sampling to build up distributions on diffusion parameters at each voxel. It creates all the files necessary for running probabilistic tractography."
+
+echo
+echo -e "###############################################################"
+echo -e "*** IMPORTANT - this program needs files with specific names:"
+echo -e "1. data: A 4D series of data volumes. This will include diffusion-weighted volumes and volume(s) with no diffusion weighting."
+echo -e "2. nodif_brain_mask: 3D binary brain mask volume derived from running bet on nodif (i.e. on a volume with no diffusion weighting)."
+echo -e "3. bvecs (with no file extension): An ASCII text file containing a list of gradient directions applied during diffusion weighted volumes. The order of entries in this file must match the order of volumes in data."
+echo -e "4. bvals (with no file extension): An ASCII text file containing a list of bvalues applied during each volume acquisition. The order of entries in this file must match the order of volumes in the input data and entries in the gradient directions text file."
+echo -e "###############################################################"
+
+##### GATHERING THE PATH TO THE ANALYSIS FOLDER #####
+# FUNCTION CALL: calls the function "analysis_mainfolder" in "mainscrcall_funclib" to allow the user to select the path to the subject's folders
+analysis_mainfolder DWI
+
+# Assigning the output variable from the function above to a local variable
+dwi_mainfolder_path=${ANALYSIS_MAINFOLDER_PATH}
+######################################################
+
+# MAIN MENU
+echo
+echo -e "Please choose if you want to:"
+echo -e "\t1. Proceed with bedpostx processing"
+echo -e "\t0. Back to main menu\n"
+
+echo -en "Please enter your option: "
+read bedpostx_process_steps
+
+# Ask for user input to continue
+while [ 1 ]
+do
+	case ${bedpostx_process_steps} in
+	0)
+		echo
+		echo -en "Going back to the PROCESSING menu "
+
+		sleep 2
+
+		exit
+		;;
+	1)
+		# Creating a log file. STEP 1 of 2 = start call
+		# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+		log_file_scripts_used start "mainscrcall_dwi_bedpostx:runs Markov Chain Monte Carlo sampling to build up distributions on diffusion parameters at each voxel of DWI images, and prepare the files for tractography" FSL "(bedpostx_process) bedpostx"
+
+		####### MAIN PATH TO SUBJECTS FOLDER CHECK ##############
+		# Checking if used the original path to DWI files or the user entered another one ("default_path" variable originates from function "DWI_mainfolder" in "functionslibr_FSL")
+		if [ ${default_path} = yes ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used the default path for DWI data: ${dwi_mainfolder_path}"
+
+		elif [ ${default_path} = no ]
+		then
+			# Creating a log file. STEP 1.5 of 2 = midscript call
+			# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. Reason for midscript call
+			log_file_scripts_used midscript "Used an alternative path for DWI data: ${dwi_mainfolder_path}"
+		fi
+		#########################################################
+
+		# Giving information to the user on what this script will do
+		echo
+		echo -e "This script will runs Markov Chain Monte Carlo sampling to build up distributions on diffusion parameters at each voxel of DWI images, and prepare the files for tractography for the subjects listed:\n"
+
+		# Making the subjects within the "SUBJLIST" variable to be listed in a numbered list for the user
+		# Establishing the initial subject numbering
+		count=1
+
+		for SUBJ in ${SUBJLIST}
+		do
+			# This is to add trailing zeros to this number, so instead of "2" you have "002" for example. Maybe needed if subject's listing gets mixed up due to numbers like "10" being listed before "2", e.g. 1 10 11 2 3 4
+			counter=`printf "%02d" ${count}`
+
+			echo "${counter}) ${SUBJ}"
+
+			# Adding a unit to the numbering variable
+			((count++))
+		done
+
+		# Cleaning the contents of the variable below
+		unset count counter
+
+		###############################
+		# Checking with the user if processing HCP data (need specific code) or not
+		echo
+		echo -en "Are you processing Human Connectome preprocessed DTI data? (y/n) "
+		read HCPdata_process_user
+		
+		if [ ${HCPdata_process_user} = y ]
+		then
+			# Variable to sign if processing HCP data
+			HCPdata_process=yes
+
+			# FUNCTION CALL: Calls the function "bedpostx_process_HCP" to proceed with bedpostx processing
+			bedpostx_process_HCP
+		else
+			# Variable to sign if processing HCP data
+			HCPdata_process=no
+			
+			# Checking if DWI distortion correction was done (this will change the DWI file name as provided by previous pre-processing steps done by my scripts
+			while [ 1 ]
+			do
+				echo
+				echo -en "Please indicate if you have done: (1) DWI fieldmap-based distortion correction; or (2) no distortion correction: "
+				read distortcorr_yesno
+
+				# Checking user's answer and asking for confirmation
+				if [ ${distortcorr_yesno} = 1 ]
+				then
+					echo
+					echo -en "Using the DWI distortion corrected file "
+
+					sleep 2
+
+					# Changing the content of the variable "dwi_filename"
+					dwi_filename=data_DWI02_undistorted
+
+					break
+
+				elif [ ${distortcorr_yesno} = 2 ]
+				then
+					echo
+					echo -e "Using the DWI eddy current corrected file"
+
+					# Using the default value for the variable "dwi_filename" as established at the beginning of this script
+					sleep 2
+
+					break
+				fi
+			done
+			
+			# FUNCTION CALL: Calls the function "bedpostx_process_nonHCP" to proceed with bedpostx processing
+			bedpostx_process_nonHCP
+		fi
+		###############################
+
+		# Checking if there is a PPSS processing file
+		if [ -f "${temp_folder}/${ppss_command_file}" ] # Checking if this file exists and is a file
+		then
+			# Calling the function "parallel_processing_ppss" to run the motion outliers command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+			# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+			parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+			echo -e "\n"
+			echo -e "Finished processing at: `current_date_time 2`"
+		else
+			echo
+			echo -en "*** No PPSS processing file was generated - please check the reason ***"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+		fi
+
+		###### Listing the subjects processed ######
+		# FUNCTION CALL: Calls the function "subjects_listed2process" in "mainscrcall_funclib" to list to the user all subjects processed and those not processed by the script invoking it
+		subjects_listed2process
+		################################################
+
+		echo
+		echo -e "Bedpostx output files will be saved within each subject's \"T1w/Diffusion\" folder"
+		
+		# Ask for user input to continue
+		echo
+		echo -en "Press any key to continue to the PROCESSING menu "
+		read -n1 anykey
+
+		echo
+		echo -e "Finished processing for the above subjects"
+
+		break
+		;;
+	*)
+		echo -e "No valid option chosen"
+		echo -en "Please re-enter an option "
+
+		sleep 2
+		;;
+	esac
+done
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"
+
+# Removing temporary folders and files created
+rm -r ${temp_folder} 2> /dev/null

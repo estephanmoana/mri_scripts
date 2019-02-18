@@ -1,0 +1,836 @@
+#! /bin/bash
+
+# This script will extract the Lesser Evil data from the raw data text files
+clear
+
+# Going to /tmp to prevent any damage to other files
+cd /tmp
+
+function LE_choice_processing {
+# Removing any previously ran analysis by deleting the folder within /tmp
+rm -rf ${temp_folder} 2> /dev/null
+
+# Creating a folder within /tmp for holding temp files
+mkdir -p ${temp_folder}/ORIG
+mkdir -p ${temp_folder}/processed
+
+# Copying the files for each subject in the raw data folder to the temp_folder within "/tmp"
+for item in `ls $raw_data_path/*.txt`
+do
+	cp $item ${temp_folder}/ORIG/
+done
+
+#### Processing the files for each subject
+# First, extracting only the lines according to the trial type (real, training) into a new cleaned up file
+for item in `ls ${temp_folder}/ORIG/*.txt`
+do
+	# Creating a variable with the file name without the ".txt"
+	item_nameonly=`echo ${item} | sed 's!'${temp_folder}'/ORIG/!!' | sed 's/.txt//'`
+
+	# Extracting the lines from the training block into a file. The numbering of the file will make the training block to be processed BEFORE the real trial blocks in the "for" loop below
+	sed -n '/Training/,/Block #1/p' ${item} | sed -e '/Training/d; /Block #1/d' | sed -n '/[^[:space:]]/p' | sed "=" | sed 'N; s/\n/ /' > ${temp_folder}/${item_nameonly}_01_LEchoice_rawdataclean_TEMP.txt
+
+	# This command will remove the following using "sed" from the original output files:
+	# 1) the lines before the actual trials, 2) All the "Blocks #" lines, and 3) "End of Experiment" line; then use the "sed -n '/[^[:space:]]/p'" command to extract the blank lines since it will print only those lines that have at least one non-space char - for some reason "sed '/^$/d'" is not able to remove the blanks lines (maybe because the text files were generated in Windows?). Finally, it will number each line of the output.
+	# It assumes that all files will have as a first word "Training" and the real trials start after "Block #1, also that the last line is always "End of experiment""
+	sed -e '/Training/,/Block #1/d; /Block/d; /End of Experiment/d' ${item} | sed -n '/[^[:space:]]/p' | sed "=" | sed 'N; s/\n/ /' > ${temp_folder}/${item_nameonly}_02_LEchoice_rawdataclean_TEMP.txt
+
+	# Changing the IFS variable value temporarily
+	# Changing the *** FIELD SEPARATOR *** from space to new line
+	# First saving the original IFS variable
+	OLD_IFS=$IFS
+
+	# Now changing FIELD SEPARATOR to new line
+	IFS=$'\n'
+
+	# Adding the trial type for each line of the file,
+	 for item in `cat ${temp_folder}/${item_nameonly}_01_LEchoice_rawdataclean_TEMP.txt`
+	 do
+		echo -e "training ${item}" >> ${temp_folder}/${item_nameonly}_training_LEchoice_rawdataclean.txt
+	 done
+
+	 for item in `cat ${temp_folder}/${item_nameonly}_02_LEchoice_rawdataclean_TEMP.txt`
+	 do
+		echo -e "real ${item}" >> ${temp_folder}/${item_nameonly}_real_LEchoice_rawdataclean.txt
+	 done
+
+	# Changing the *** FIELD SEPARATOR *** back to the default
+	IFS=$OLD_IFS
+done
+
+# Second, extracting the information from the cleaned up file
+for subjs_file in `ls ${temp_folder}/*_LEchoice_rawdataclean.txt` # listing all files so each is processed individually
+do
+	# Defining variables to count the trial number for each level. Note that his has to be within the above "for" loop (for each subject) but outside the one below (for each line within the subject's file)
+	trial_med_count=0
+	trial_hi_count=0
+	trial_reinf_total_count=0
+	trial_reinf_med_count=0
+	trial_reinf_hi_count=0
+	trial_reversal_med_count=0
+	trial_reversal_hi_count=0
+
+	# Giving an initial value for these variables, otherwise the "if" statement will give an error as they are empty in the beginning
+	subj_response_med_previous=-
+	subj_response_hi_previous=-
+
+	# Getting the subject's file without the full path into a variable for extracting the subjectID and test date info below
+	subjs_file_nameonly=`echo ${subjs_file} | sed 's!'${temp_folder}'/!!' | sed 's/_LEchoice_rawdataclean.txt//'`
+
+	# Geeting the file type into a variable
+	subj_file_type=`echo ${subjs_file_nameonly} | awk -F_ '{print $2}'`
+
+	# Getting the subject ID and test date into variables
+	subjID=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $1}'`
+	test_month=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $2}' | awk 'BEGIN {FS=""; OFS=""} {print $1, $2}'`
+	test_day=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $2}' | awk 'BEGIN {FS=""; OFS=""} {print $3, $4}'`
+	test_year=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $2}' | awk 'BEGIN {FS=""; OFS=""} {print 20, $5, $6}'`
+	test_hr=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $3}'`
+	test_min=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $4}' | awk -F_ '{print $1}'` # The second awk command is needed to separate the digits of minutes from the "_real" or "_training" part of the file name
+
+	# Giving feedback to the user
+	echo -e "\n"
+	echo -en "Processing \"${LE_paradigm}_${subj_file_type}\" file for subject ### ${subjID}_${test_year}${test_month}${test_day} ### "
+
+	# Changing the field separator to new line only
+	OLD_IFS=$IFS # Holding the original IFS content into a variable
+	IFS=$'\n'
+
+	############### PROCESSING EACH LINE FOR THE OUTPUT TEXT FILE ##########################
+	for item_raw in `cat ${subjs_file}` # Processing each line for the file being processed
+	do
+		# Cleaning the carriage returns from the output files that were generated in Windows and saving it into the variable "item". Got the sed substitution to work in Mac OS X looking at this website: http://stackoverflow.com/questions/800030/remove-carriage-return-in-unix
+		item=`echo ${item_raw} | sed "s/$(printf '\r')\$//"`
+
+		# Getting the trial type into a variable
+		trial_type=`echo ${item} | awk '{print $1}'`
+
+		# Getting the trial number into a variable
+		trial_number=`echo ${item} | awk '{print $2}'`
+
+		# Getting the stimulus level and values into variables
+		stimtype=`echo ${item} | awk '{print $3}' | awk 'BEGIN {FS="_"} {print $1}'`
+		stim_level=`echo ${item} | awk '{print $3}' | awk 'BEGIN {FS="_"} {print $2}'`
+
+
+		####################################################################################
+		########## Checking level of first stimulus for the line being processed ###########
+		if [ ${stim_level} = med ] ########## Checking if first stimulus provided was "med" ###########
+		then
+			# Checking if the first stimulus provided in the pair was Aud or Mech
+			if [ ${stimtype} = A ] # If Aud was first then Mech was second - thus the awk fields are in ascending order
+			then
+				A_med=`echo ${item} | awk '{print $4}'`
+				M_med=`echo ${item} | awk '{print $7}'`
+
+			elif [ ${stimtype} = M ] # If Mech was first then Aud was second - thus the awk fields are in descending order
+			then
+				A_med=`echo ${item} | awk '{print $7}'`
+				M_med=`echo ${item} | awk '{print $4}'`
+			fi
+
+			# Putting dashes for Aud and Mech high, since this is a med level stimuli
+			A_hi=-
+			M_hi=-
+
+			subj_response_med=`echo ${item} | awk '{print $10}'`
+			subj_response_hi=-
+
+			# Checking if the subject's response was entered correct, i.e., is either a value of 1, 2, 3, or 4 - ANYTHING ELSE IS LIKELY DUE AN OPERATOR ERROR
+			if [ $subj_response_med = 1 ] || [ $subj_response_med = 2 ] || [ $subj_response_med = 3 ] || [ $subj_response_med = 4 ]
+			then
+				######################################
+				###### Checking for REINFORCERS #####
+				# Checking if a reinforcer was delivered
+				reinforcer=`echo ${item} | awk '{print $12}'`
+
+				# If this variable is: 1) Not empty; AND 2) equal to "Reinforcer", then a reinforcer stimulus was delivered
+				if [ -n "${reinforcer}" ] && [ ${reinforcer} = Reinforcer ]
+				then
+					reinforcer_type=`echo ${item} | awk '{print $13}'`
+					reinforcer_intensity=`echo ${item} | awk '{print $14}'`
+
+					# Determining the reinforcer type and storing it into a variable (1-Aud med; 2-Aud high; 3-Mech med; 4-Mech high)
+					if [ ${subj_response_med} = 1 ] || [ ${subj_response_med} = 2 ] # Testing to see if the subject's response in the LE scale was "1" or "2" which are for mechanical stimulus
+					then
+						reinforcer_type=3
+					elif [ ${subj_response_med} = 3 ] || [ ${subj_response_med} = 4 ] # Testing to see if the subject's response in the LE scale was "3" or "4" which are for auditory stimulus
+					then
+						reinforcer_type=1
+					fi
+
+					# Adding a unit to the "trial_reinf_total_count" variable
+					trial_reinf_total_count=$[ $trial_reinf_total_count + 1 ]
+
+					# Adding a unit to the "trial_reinf_med_count" variable
+					trial_reinf_med_count=$[ $trial_reinf_med_count + 1 ]
+
+					# Giving content to the variables "trial_reinf_total"
+					trial_reinf_total=${trial_reinf_total_count}
+
+					# Giving content to the variables "trial_reinf_med" and "trial_reinf_hi"
+					trial_reinf_med=${trial_reinf_med_count}
+					trial_reinf_hi=-
+				else
+					reinforcer_type=-
+					reinforcer_intensity=-
+
+					# Giving content to the variables "trial_reinf_total", "trial_reinf_med" and "trial_reinf_hi"
+					trial_reinf_total=-
+					trial_reinf_med=-
+					trial_reinf_hi=-
+				fi
+				######################################
+
+				######################################
+				###### Checking for REVERSALS #####
+				# Checking if the current subject's response is for Mechanical or Auditory
+				if [ ${subj_response_med} = 1 ] || [ ${subj_response_med} = 2 ]
+				then
+					subj_response_med_current=M
+
+				elif [ ${subj_response_med} = 3 ] || [ ${subj_response_med} = 4 ]
+				then
+					subj_response_med_current=A
+				fi
+
+				# Now comparing the subject's previous response to the current one to check if a reversal occurred
+				if [ ${subj_response_med_previous} = ${subj_response_med_current} ] || [ ${subj_response_med_previous} = - ]
+				# This "if" statement checks if the previous "med" response was equal to the current, OR if the previous response was a dash which signals that there was no previous response
+				then
+# 					reversal_med=0
+# 					reversal_hi=-
+
+					reversal_med=-
+					reversal_hi=-
+
+					# No reversal mean needs to be calculated as no reversal occurred
+					reversal_mean_med=-
+					reversal_mean_hi=-
+
+				elif [ ${subj_response_med_previous} != ${subj_response_med_current} ] && [ ${subj_response_med_previous} != - ]
+				# The 2 variables must be different AND the "previous" must not be a dash, since for the initial trial the "previous" variable content is a dash as there is no previous response
+				then
+# 					reversal_med=1
+# 					reversal_hi=-
+
+					# Adds a unit to the count of reversals for medium level
+					trial_reversal_med_count=$[ $trial_reversal_med_count + 1 ]
+
+					# Giving the content of variable "trial_reversal_med_count" to the variable "reversal_med" to avoid changing other parts of the script
+					reversal_med=$trial_reversal_med_count
+					reversal_hi=-
+
+					# Computing the mean between the 2 mechanical stimuli prior and subsequent to the reversal
+					reversal_mean_med=`echo " scale=2; (${M_med} + ${M_med_previous}) / 2" | bc`
+					reversal_mean_hi=-
+				fi
+				######################################
+			else
+				# Since the subject's response entered was not 1, 2, 3, or 4, giving it a value of "INVALID". Repeating the variable "subj_response_hi" for simmetry
+				subj_response_med=INVALID
+				subj_response_hi=-
+			fi
+
+			# Adding a unit to the "trial_med_count" variable
+			trial_med_count=$[ $trial_med_count + 1 ]
+
+			# Giving content to the variables "trial_med" and "trial_hi"
+			trial_med=${trial_med_count}
+			trial_hi=-
+
+		####################################################################################
+		########## Checking level of first stimulus for the line being processed ###########
+		elif [ ${stim_level} = hi ] ########## Checking if first stimulus provided was "hi" ###########
+		then
+			A_med=-
+			M_med=-
+
+			# Checking if the first stimulus provided in the pair was Aud or Mech
+			if [ ${stimtype} = A ]
+			then
+				A_hi=`echo ${item} | awk '{print $4}'`
+				M_hi=`echo ${item} | awk '{print $7}'`
+
+			elif [ ${stimtype} = M ]
+			then
+				A_hi=`echo ${item} | awk '{print $7}'`
+				M_hi=`echo ${item} | awk '{print $4}'`
+			fi
+
+			subj_response_med=-
+			subj_response_hi=`echo ${item} | awk '{print $10}'`
+
+			# Checking if the subject's response was entered correct, i.e., is either a value of 1, 2, 3, or 4 - ANYTHING ELSE IS LIKELY DUE AN OPERATOR ERROR
+			if [ $subj_response_hi = 1 ] || [ $subj_response_hi = 2 ] || [ $subj_response_hi = 3 ] || [ $subj_response_hi = 4 ]
+			then
+				######################################
+				###### Checking for REINFORCERS #####
+				# Checking if a reinforcer was delivered
+				reinforcer=`echo ${item} | awk '{print $12}'`
+
+				if [ -n "${reinforcer}" ] && [ ${reinforcer} = Reinforcer ]
+				then
+					reinforcer_type=`echo ${item} | awk '{print $13}'`
+					reinforcer_intensity=`echo ${item} | awk '{print $14}'`
+
+					# Determining the reinforcer type and storing it into a variable (1-Aud med; 2-Aud high; 3-Mech med; 4-Mech high)
+					if [ ${subj_response_hi} = 1 ] || [ ${subj_response_hi} = 2 ] # testing to see if the subject's response in the LE scale was "1" or "2" which are for mechanical stimulus
+					then
+						reinforcer_type=4
+					elif [ ${subj_response_hi} = 3 ] || [ ${subj_response_hi} = 4 ] # testing to see if the subject's response in the LE scale was "3" or "4" which are for auditory stimulus
+					then
+						reinforcer_type=2
+					fi
+
+					# Adding a unit to the "trial_reinf_total_count" variable
+					trial_reinf_total_count=$[ $trial_reinf_total_count + 1 ]
+
+					# Adding a unit to the "trial_reinf_hi_count" variable
+					trial_reinf_hi_count=$[ $trial_reinf_hi_count + 1 ]
+
+					# Giving content to the variables "trial_reinf_total"
+					trial_reinf_total=${trial_reinf_total_count}
+
+					# Giving content to the variables "trial_reinf_med" and "trial_reinf_hi"
+					trial_reinf_med=-
+					trial_reinf_hi=${trial_reinf_hi_count}
+				else
+					reinforcer_type=-
+					reinforcer_intensity=-
+
+					# Giving content to the variables "trial_reinf_total" and "trial_reinf_hi"
+					trial_reinf_total=-
+					trial_reinf_med=-
+					trial_reinf_hi=-
+				fi
+				######################################
+
+				######################################
+				###### Checking for REVERSALS #####
+				# Checking if the current subject's response is for Mechanical or Auditory
+				if [ ${subj_response_hi} = 1 ] || [ ${subj_response_hi} = 2 ]
+				then
+					subj_response_hi_current=M
+
+				elif [ ${subj_response_hi} = 3 ] || [ ${subj_response_hi} = 4 ]
+				then
+					subj_response_hi_current=A
+				fi
+
+				# Now comparing the subject's previous response to the current one to check if a reversal occurred
+				if [ ${subj_response_hi_previous} = ${subj_response_hi_current} ]  || [ ${subj_response_hi_previous} = - ]
+				# This "if" statement checks if the previous "med" response was equal to the current, OR if the previous response was a dash which signals that there was no previous response
+				then
+# 					reversal_med=-
+# 					reversal_hi=0
+
+					reversal_med=-
+					reversal_hi=-
+
+					# No reversal mean needs to be calculated as no reversal occurred
+					reversal_mean_med=-
+					reversal_mean_hi=-
+
+				elif [ ${subj_response_hi_previous} != ${subj_response_hi_current} ] && [ ${subj_response_hi_previous} != - ]
+				# The 2 variables must be different and the "previous" must not be a dash, since for the initial trial the "previous" variable content is a dash as there is no previous response
+				then
+# 					reversal_med=-
+# 					reversal_hi=1
+
+					# Adds a unit to the count of reversals for medium level
+					trial_reversal_hi_count=$[ $trial_reversal_hi_count + 1 ]
+
+					# Giving the content of variable "trial_reversal_med_count" to the variable "reversal_med" to avoid changing other parts of the script
+					reversal_med=-
+					reversal_hi=$trial_reversal_hi_count
+
+					# Computing the mean between the 2 mechanical stimuli prior and subsequent to the reversal
+					reversal_mean_med=-
+					reversal_mean_hi=`echo " scale=2; (${M_hi} + ${M_hi_previous}) / 2" | bc`
+				fi
+				######################################
+			else
+				# Since the subject's response entered was not 1, 2, 3, or 4, giving it a value of "INVALID". Repeating the variable "subj_response_med" for simmetry
+				subj_response_med=-
+				subj_response_hi=INVALID
+			fi
+
+			# Adding a unit to the "trial_hi_count" variable
+			trial_hi_count=$[ $trial_hi_count + 1 ]
+
+			# Giving content to the variables "trial_med" and "trial_hi"
+			trial_med=-
+			trial_hi=${trial_hi_count}
+		fi
+
+		######################################
+		######### Holding subjects' response to the stimulus from the line just processed into a variable so the next line to be processed can detect if a REVERSAL is present ##########
+		if [ ${subj_response_med} = 1 ] || [ ${subj_response_med} = 2 ]
+		then
+			subj_response_med_previous=M
+
+		elif [ ${subj_response_med} = 3 ] || [ ${subj_response_med} = 4 ]
+		then
+			subj_response_med_previous=A
+
+		elif [ ${subj_response_med} = - ]
+		then
+			echo -en # This will keep the contents of variable "subj_response_med_previous" unchanged, since in this case the line being processed refers to a "hi" stimulus
+		fi
+
+		if [ ${subj_response_hi} = 1 ] || [ ${subj_response_hi} = 2 ]
+		then
+			subj_response_hi_previous=M
+
+		elif [ ${subj_response_hi} = 3 ] || [ ${subj_response_hi} = 4 ]
+		then
+			subj_response_hi_previous=A
+
+		elif [ ${subj_response_hi} = - ]
+		then
+			echo -en # This will keep the contents of variable "subj_response_hi_previous" unchanged, since in this case the line being processed refers to a "med" stimulus
+		fi
+		######################################
+
+		######################################
+		######### Holding stimuli levels from the line just processed into a variable for the next line to be processed so in case a REVERSAL is present the mean between the 2 stimulus can be computed ##########
+		if [ ${A_med} != - ] && [ ${M_med} != - ] # Checking if this was a "med" trial. Testing for both "med" stimuli here is probably overkill...
+		then
+			M_med_previous=${M_med}
+
+		elif [ ${A_hi} != - ] && [ ${M_hi} != - ] # Checking if this was a "med" trial. Testing for both "med" stimuli here is probably overkill...
+		then
+			M_hi_previous=${M_hi}
+		fi
+		######################################
+
+		# Outputing the extracted data into the temporary output file
+		echo -e "${subjID}:${trial_type}:${trial_number}:${trial_med}:${trial_hi}:${trial_reinf_total}:${trial_reinf_med}:${trial_reinf_hi}:${A_med}:${M_med}:${A_hi}:${M_hi}:${subj_response_med}:${subj_response_hi}:${reinforcer_type}:${reinforcer_intensity}:${reversal_med}:${reversal_hi}:${reversal_mean_med}:${reversal_mean_hi}" >> ${temp_folder}/processed/${subj_file_type}_${subjID}_${test_year}${test_month}${test_day}_${test_hr}hr${test_min}min_${LE_paradigm}.txt
+	done
+
+	echo
+	echo -en "Finished processing for subject ### ${subjID}_${test_year}${test_month}${test_day} ###"
+
+	# Cleaning the contents of these variables so it does not carry over to the next subject to be processed
+	unset subj_response_med_previous
+	unset subj_response_hi_previous
+done
+
+# Routine to merge both files for each subject into a single output file
+# Step 01: get a list of all subject ID from the filenames
+subjID_list=`ls ${temp_folder}/processed/*real*.txt | sed 's!'${temp_folder}/processed/'!!' | awk 'BEGIN {FS="_"} {print $2}'`
+
+# Step 02: "for" loop to go through each subject's file
+for item in $subjID_list
+do
+	# Removing the first item of the file name being processed (= trial type (training, real)) and storing the remainder into a variable to name the output file.
+	output_filename=`ls ${temp_folder}/processed/real_${item}_*.txt | sed 's!'${temp_folder}/processed/real_'!!'`
+
+	# Adding the headers to the output file
+	echo -e "Coding for variable \"Reinf_type\" = 1-Aud med; 2-Aud high; 3-Mech med; 4-Mech high\n" > ${output_path}/${output_filename}
+	echo -e "SubjID:Trial type:Trial_total:Trial_med:Trial_hi:Trial_reinf_total:Trial_reinf_med:Trial_reinf_hi:A_med:M_med:A_hi:M_hi:Resp_med:Resp_hi:Reinf_type:Reinf_intensity:Revers_med:Revers_hi:Revers_mean_med:Revers_mean_hi" >> ${output_path}/${output_filename}
+
+	# Consolidating both files for each subject into a single one
+	cat ${temp_folder}/processed/training_${item}_* >> ${output_path}/${output_filename}
+	cat ${temp_folder}/processed/real_${item}_* >> ${output_path}/${output_filename}
+done
+}
+
+function LE_escape_processing {
+# Removing any previously ran analysis by deleting the folder within /tmp
+rm -rf ${temp_folder} 2> /dev/null
+
+# Creating a folder within /tmp for holding temp files
+mkdir -p ${temp_folder}/ORIG
+
+# Copying the files for each subject in the raw data folder to the temp_folder within "/tmp"
+for item in `ls ${raw_data_path}/*.txt`
+do
+	cp $item ${temp_folder}/ORIG/
+done
+
+#### Processing the files for each subject
+# First, extracting only the lines that are real trials into a new cleaned up file
+for item in `ls ${temp_folder}/ORIG/*.txt`
+do
+	# Creating a variable with the file name without the ".txt"
+	item_nameonly=`echo ${item} | sed 's!'${temp_folder}'/ORIG/!!' | sed 's/.txt//'`
+
+	# This command will remove using "sed" from the original output files the following:
+	# 1) the lines before the actual trials, 2) All the "-----------------------" lines (do notice that the first occurrence has one more dash than the rest of them thus need for 2 different sed calls, and 3) "End of Paradigm" line; then use the "sed -n '/[^[:space:]]/p'" command to extract the blank lines since it will print only those lines that have at least one non-space char - for some reason "sed '/^$/d'" is not able to remove the blanks lines (maybe because the text files were generated in Windows?).
+	# It assumes that all files will have as a first word "Starting "Escape Paradigm Session" and the real trials start after the line "-----------------------" and that the last line is always "End of experiment""
+	sed -e '/Starting "Escape Paradigm Session"/d; /-----------------------/d; /----------------------/d; /End of Paradigm/d' ${item} | sed -n '/[^[:space:]]/p' | sed "=" | sed 'N; s/\n/ /' > ${temp_folder}/${item_nameonly}_LEescape_rawdataclean
+done
+
+# Second, extracting the information from the cleaned up file
+for subjs_file in `ls ${temp_folder}/*_LEescape_rawdataclean` # listing all files so each is processed individually
+do
+	# Defining variables to count the trial number for each level. Note that his has to be within the above "if" statement (for each subject) but outside the one below (for each line within the subject's file)
+	trial_number_initial=0
+	trial_number_processed=0
+	trial_med_count=0
+	trial_hi_count=0
+	trial_reversal_med_count=0
+	trial_reversal_hi_count=0
+
+	# Giving an initial value for these variables, otherwise the "if" statement will give an error as they are empty in the beginning
+	subj_response_med_previous=-
+	subj_response_hi_previous=-
+
+	# Getting the subject's file without the full path into a variable for extracting the subjectID and test date info below
+	subjs_file_nameonly=`echo ${subjs_file} | sed 's!'${temp_folder}'/!!' | sed 's/_LEescape_rawdataclean//'`
+
+	# Getting the subject ID and test date into variables
+	subjID=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $1}'`
+	test_month=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $2}' | awk 'BEGIN {FS=""; OFS=""} {print $1, $2}'`
+	test_day=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $2}' | awk 'BEGIN {FS=""; OFS=""} {print $3, $4}'`
+	test_year=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $2}' | awk 'BEGIN {FS=""; OFS=""} {print 20, $5, $6}'`
+	test_hr=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $3}'`
+	test_min=`echo ${subjs_file_nameonly} | awk 'BEGIN {FS="."} {print $4}'`
+
+	# Outputing the extracted information into a file individualized for the subject
+	# Creating the file for the subject being processed
+	touch ${output_path}/${subjID}_${test_year}${test_month}${test_day}_${test_hr}hr${test_min}min_${LE_paradigm}.txt
+
+	# Giving feedback to the user
+	echo
+	echo -en "Processing \"${LE_paradigm}\" files for subject ### ${subjID}_${test_year}${test_month}${test_day} ### "
+
+	# Creating the headers for the output file
+	echo -e "SubjID:Trial_total:Trial_med:Trial_hi:A_med:M_med:A_hi:M_hi:Resp_med:Resp_hi:Revers_med:Revers_hi:Revers_mean_med:Revers_mean_hi:Subj_delay (sec)" >> ${output_path}/${subjID}_${test_year}${test_month}${test_day}_${test_hr}hr${test_min}min_${LE_paradigm}.txt
+
+	# Changing the field separator to new line only
+	OLD_IFS=$IFS # Holding the original IFS content into a variable
+	IFS=$'\n'
+
+	############### PROCESSING EACH LINE FOR THE OUTPUT TEXT FILE ##########################
+	for item_raw in `cat ${subjs_file}` # Processing each line for the file being processed
+	do
+		# Cleaning the carriage returns from the output files that were generated in Windows and saving it into the variable "item". Got the sed substitution to work in mac os x looking at this website: http://stackoverflow.com/questions/800030/remove-carriage-return-in-unix
+		item=`echo ${item_raw} | sed "s/$(printf '\r')\$//"`
+
+		###### Collecting initial info into variables ######
+		new_trial=`echo ${item} | awk '{print $2}'` # Needed to check if this line is for a new trial. A line for a new trial is "Starting XXXXXXXXX Level Stimuli"
+
+		# Checking if this line is for a new trial
+		if [ ${new_trial} = Starting ]
+		then
+			# Counting the TRIAL NUMBER being processed
+			trial_number_initial=$[ ${trial_number_initial} + 1 ]
+
+			# Counting the last line for the current trial being processed. Remember that each trial in the LE_Escape output files have 5 lines each. Need to use the variable "trial_number_processed" because it counts each line for the trial being processed, while the variable "trial_number_initial" keeps track only of the initial line for each trial
+			trial_last_line=$[ ${trial_number_processed} + 5 ]
+
+			# Getting the stimulus level
+			stim_level_raw=`echo ${item} | awk '{print $3}'`
+
+			if [ ${stim_level_raw} = Medium ]
+			then
+				# Adding a unit to the "trial_med_count" variable
+				trial_med_count=$[ $trial_med_count + 1 ]
+
+				# Giving content to the variables "trial_med" and "trial_hi"
+				trial_med=${trial_med_count}
+				trial_hi=-
+
+			elif [ ${stim_level_raw} = High ]
+			then
+				# Adding a unit to the "trial_hi_count" variable
+				trial_hi_count=$[ $trial_hi_count + 1 ]
+
+				# Giving content to the variables "trial_med" and "trial_hi"
+				trial_med=-
+				trial_hi=${trial_hi_count}
+			fi
+
+			# Adding a unit to the variable "trial_number_processed" needed to check if this is stil the same trial or a new one
+			trial_number_processed=$[ ${trial_number_processed} + 1 ]
+
+		elif [ ${new_trial} != Starting ] # In this case, the line being processed belongs to the same trial
+		then
+			# Checking if this line notes the stimulus given and its level
+			stimtype_raw=`echo ${item} | awk '{print $2}'`
+
+			if [ ${stimtype_raw} = Auditory ] && [ ${stim_level_raw} = Medium ] ########## Checking if stimulus provided was "Auditory" ###########
+			then
+				A_med=`echo ${item} | awk '{print $4}'`
+				A_hi=-
+
+			elif [ ${stimtype_raw} = Auditory ] && [ ${stim_level_raw} = High ] ########## Checking if stimulus provided was "Auditory" ###########
+			then
+				A_med=-
+				A_hi=`echo ${item} | awk '{print $4}'`
+
+			elif [ ${stimtype_raw} = Mechanical ] && [ ${stim_level_raw} = Medium ] ########## Checking if stimulus provided was "Mechanical" ###########
+			then
+				M_med=`echo ${item} | awk '{print $4}'`
+				M_hi=-
+
+			elif [ ${stimtype_raw} = Mechanical ] && [ ${stim_level_raw} = High ] ########## Checking if stimulus provided was "Mechanical" ###########
+			then
+
+				M_med=-
+				M_hi=`echo ${item} | awk '{print $4}'`
+			fi
+
+###################### NEED TO ADD SOME VERIFICATION IF THE SUBJECT RESPONSE IS EITHER 1, OR 2 - ANYTHING ELSE IS AN ERROR LIKELY DUE TO OPERATOR ERROR #####################
+
+			# Checking if the line being processed contains the subject's response
+			subj_response_raw=`echo ${item} | awk '{print $3}'`
+
+			if [ -n "${subj_response_raw}" ] && [ ${subj_response_raw} = response ] && [ ${stim_level_raw} = Medium ]
+			then
+				subj_response_med=`echo ${item} | awk '{print $6}'`
+				subj_response_hi=-
+
+			elif [ -n "${subj_response_raw}" ] && [ ${subj_response_raw} = response ] && [ ${stim_level_raw} = High ]
+			then
+				subj_response_med=-
+				subj_response_hi=`echo ${item} | awk '{print $6}'`
+			fi
+
+			# Checking if the line being processed contains the subject's response time
+			subj_delay_raw=`echo ${item} | awk '{print $3}'`
+
+			if [ -n "${subj_delay_raw}" ] && [ ${subj_delay_raw} = delay ]
+			then
+				subj_delay=`echo ${item} | awk '{print $6}'`
+			fi
+
+			# Adding a unit to the variable "trial_number_processed" needed to check if this is stil the same trial or a new one
+			trial_number_processed=$[ ${trial_number_processed} + 1 ]
+		fi
+
+		# Checking if this was the last line for the trial being processed or the line belongs to a new trial
+		if [ ${trial_number_processed} -eq ${trial_last_line} ] # If they are the same, this is the last line for the trial being processed
+		then
+			###### Checking for REVERSALS for MEDIUM #####
+			# Checking if the current subject's response is for Mechanical or Auditory
+			if [ ${stim_level_raw} = Medium ]
+			then
+				if [ ${subj_response_med} = 1 ]
+				then
+					subj_response_med_current=A
+
+				elif [ ${subj_response_med} = 2 ]
+				then
+					subj_response_med_current=M
+				fi
+
+				# Now comparing the subject's previous response to the current one to check if a reversal occurred
+				if [ ${subj_response_med_previous} = ${subj_response_med_current} ] || [ ${subj_response_med_previous} = - ]
+				# This "if" statement checks if the previous "med" response was equal to the current, OR if the previous response was a dash which signals that there was no previous response
+				then
+# 					reversal_med=0
+# 					reversal_hi=-
+
+					reversal_med=-
+					reversal_hi=-
+
+					# No reversal mean needs to be calculated as no reversal occurred
+					reversal_mean_med=-
+					reversal_mean_hi=-
+
+				elif [ ${subj_response_med_previous} != ${subj_response_med_current} ] && [ ${subj_response_med_previous} != - ]
+				# The 2 variables must be different and the "previous" must not be a dash, since for the initial trial the "previous" variable content is a dash as there is no previous response
+				then
+# 					reversal_med=1
+# 					reversal_hi=-
+
+					# Adds a unit to the count of reversals for medium level
+					trial_reversal_med_count=$[ $trial_reversal_med_count + 1 ]
+
+					# Giving the content of variable "trial_reversal_med_count" to the variable "reversal_med" to avoid changing other parts of the script
+					reversal_med=$trial_reversal_med_count
+					reversal_hi=-
+
+					# Computing the mean between the 2 mechanical stimuli prior and subsequent to the reversal
+					reversal_mean_med=`echo " scale=2; (${M_med} + ${M_med_previous}) / 2" | bc`
+					reversal_mean_hi=-
+				fi
+			fi
+
+			###### Checking for REVERSALS for HIGH #####
+			# Checking if the current subject's response is for Mechanical or Auditory
+			if [ ${stim_level_raw} = High ]
+			then
+				if [ ${subj_response_hi} = 1 ]
+				then
+					subj_response_hi_current=A
+
+				elif [ ${subj_response_hi} = 2 ]
+				then
+					subj_response_hi_current=M
+				fi
+
+				# Now comparing the subject's previous response to the current one to check if a reversal occurred
+				if [ ${subj_response_hi_previous} = ${subj_response_hi_current} ]  || [ ${subj_response_hi_previous} = - ]
+				# This "if" statement checks if the previous "med" response was equal to the current, OR if the previous response was a dash which signals that there was no previous response
+				then
+# 					reversal_med=-
+# 					reversal_hi=0
+
+					reversal_med=-
+					reversal_hi=-
+
+					# No reversal mean needs to be calculated as no reversal occurred
+					reversal_mean_med=-
+					reversal_mean_hi=-
+
+				elif [ ${subj_response_hi_previous} != ${subj_response_hi_current} ] && [ ${subj_response_hi_previous} != - ]
+				# The 2 variables must be different and the "previous" must not be a dash, since for the initial trial the "previous" variable content is a dash as there is no previous response
+				then
+# 					reversal_med=-
+# 					reversal_hi=1
+
+					# Adds a unit to the count of reversals for medium level
+					trial_reversal_hi_count=$[ $trial_reversal_hi_count + 1 ]
+
+					# Giving the content of variable "trial_reversal_med_count" to the variable "reversal_med" to avoid changing other parts of the script
+					reversal_med=-
+					reversal_hi=$trial_reversal_hi_count
+
+					# Computing the mean between the 2 mechanical stimuli prior and subsequent to the reversal
+					reversal_mean_med=-
+					reversal_mean_hi=`echo " scale=2; (${M_hi} + ${M_hi_previous}) / 2" | bc`
+				fi
+			fi
+
+			######### Holding subjects' response to the stimulus from the line just processed into a variable for the next line to be processed to detect if a REVERSAL is present ##########
+			if [ ${subj_response_med} = 1 ]
+			then
+				subj_response_med_previous=A
+
+			elif [ ${subj_response_med} = 2 ]
+			then
+				subj_response_med_previous=M
+
+			elif [ ${subj_response_med} = - ]
+			then
+				echo -en # This will keep the contents of variable "subj_response_med_previous" unchanged, since in this case the line being processed refers to a "hi" stimulus
+			fi
+
+			if [ ${subj_response_hi} = 1 ]
+			then
+				subj_response_hi_previous=A
+
+			elif [ ${subj_response_hi} = 2 ]
+			then
+				subj_response_hi_previous=M
+
+			elif [ ${subj_response_hi} = - ]
+			then
+				echo -en # This will keep the contents of variable "subj_response_hi_previous" unchanged, since in this case the line being processed refers to a "med" stimulus
+			fi
+
+			######### Holding stimuli levels from the line just processed into a variable for the next line to be processed so in case a REVERSAL is present the mean between the 2 stimulus can be computed ##########
+			if [ ${A_med} != - ] && [ ${M_med} != - ] # Checking if this was a "med" trial. Testing for both "med" stimuli here is probably overkill...
+			then
+				M_med_previous=${M_med}
+
+			elif [ ${A_hi} != - ] && [ ${M_hi} != - ] # Checking if this was a "med" trial. Testing for both "med" stimuli here is probably overkill...
+			then
+				M_hi_previous=${M_hi}
+			fi
+
+			# Consolidating the variables for output
+			trial_number=${trial_number_initial}
+
+			# Outputing the extracted data into the output file
+			echo -e "${subjID}:${trial_number}:${trial_med}:${trial_hi}:${A_med}:${M_med}:${A_hi}:${M_hi}:${subj_response_med}:${subj_response_hi}:${reversal_med}:${reversal_hi}:${reversal_mean_med}:${reversal_mean_hi}:${subj_delay}" >> ${output_path}/${subjID}_${test_year}${test_month}${test_day}_${test_hr}hr${test_min}min_${LE_paradigm}.txt
+		fi
+	done
+
+	echo
+	echo -e "Finished processing for subject ### ${subjID}_${test_year}${test_month}${test_day} ###"
+
+	# Cleaning the contents of these variables so it does not carry over to the next subject to be processed
+	unset subj_response_med_previous
+	unset subj_response_hi_previous
+done
+}
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/psychophys_processing
+######################################################################
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+# Asking input from the user
+echo -e "This script will extract the raw data from the text files for Lesser Evil paradigm"
+echo -e "and will export it into a text file"
+
+echo
+echo -en "Please enter the FULL PATH for the raw data files to be processed: "
+read raw_data_path
+
+echo
+echo -en "Now enter the FULL PATH where to save the output files: "
+read output_path
+
+while [ 1 ]
+do
+	echo -e "\n"
+	echo -e "Choose which LE paradigm do you want to process:"
+	echo -en "(1) LE choice or (2) LE escape (enter \"1\" or \"2\"): "
+	read paradigm_choosen
+
+	if [ ${paradigm_choosen} = 1 ]
+	then
+		LE_paradigm=LE_CHOICE
+
+		break
+
+	elif [ ${paradigm_choosen} = 2 ]
+	then
+		LE_paradigm=LE_ESCAPE
+
+		break
+	else
+		echo
+		echo -en "No valid option - please choose between \"1\" or \"2\" "
+		sleep 2
+	fi
+done
+
+# Giving feedback to the user and asking for confirmation
+echo -e "\n"
+echo -e "This will process raw output files for the paradigm *** ${LE_paradigm} ***"
+echo -e "These are the text files contained within the raw data folder:\n"
+
+ls ${raw_data_path}/*.txt | sed 's!'${raw_data_path}'/!!' | sed "=" | sed 'N; s/\n/) /'
+
+echo
+echo -en "Is this correct? (y to proceed/n to abort): "
+read yesno
+
+if [ ${yesno} = y ] || [ ${yesno} = Y ]
+then
+	echo
+	echo -en "Processing files... "
+
+	if [ ${LE_paradigm} = LE_CHOICE ]
+	then
+		# Calling the function "LE_choice_processing" for processing
+		LE_choice_processing
+
+	elif [ ${LE_paradigm} = LE_ESCAPE ]
+	then
+		# Calling the function "LE_choice_processing" for processing
+		LE_escape_processing
+	fi
+else
+	exit
+fi
+
+echo -e "\n"
+echo -e "Finished processing for all subjects"
+echo -en "Press any key to exit "
+read -n1 anykey
+
+# Deleting all filed from the "/tmp" folder
+rm -rf ${temp_folder}

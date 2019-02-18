@@ -1,0 +1,333 @@
+#! /bin/bash
+
+# This script will create the directory structure needed for Freesurfer analysis
+
+# Sourcing of functions library files #
+. mainscrcall_funclib
+
+# Setting Ctrl + C as key combination to go back to PROCESSING menu. Also signals to the log file (=if there is one) that this script was interrupted
+trap "echo -en '\n\nGoing back to the PROCESSING menu '; sleep 2; log_file_scripts_used interrupt; exit" SIGINT
+
+# Checking if variables are not empty
+emptvar=${MEDIA}
+var_checked="THE MAIN FOLDER HOLDING MRI DATA"
+checkemptvar
+
+emptvar=${EXPERIMENT}
+var_checked="THE EXPERIMENT NAME"
+checkemptvar
+
+emptvar="${SUBJLIST}"
+var_checked="THE SUBJECT(S) TO BE PROCESSED"
+checkemptvar
+
+emptvar="${SUBJS_FOLDERS_PATH}"
+var_checked="THE FOLDER CONTAINING ALL SUBJECTS' FOLDERS"
+checkemptvar
+
+##########			FUNCTIONS USED IN THIS SCRIPT			##########
+function freesurfer_subjsfolder {
+# This function will create the folder structure needed for each subject within the "analysis_freesurfer" folder
+
+# Giving feedback to the user
+echo
+echo -e "##############################################################"
+echo -e "##### Checking all subjects for valid DICOM T1 folder(s) #####"
+echo -e "##############################################################"
+
+for SUBJ in ${SUBJLIST}
+do
+	##########################################################
+	# Gathering the DICOM folder(s) for T1-weighted image(s)
+	subj_DICOM_folder_temp=`ls -d ${SUBJS_FOLDERS_PATH}/${SUBJ}/${anat_folder}/DICOM_*T1*`
+	##########################################################
+
+	##########################################################
+	# Checking if this subject has more than one DICOM T1 folder
+	# Establishing the initial numbering
+	count_folder=0
+
+	for item in ${subj_DICOM_folder_temp}
+	do
+		# Adding a unit to the counting variable
+		((count_folder++))
+	done
+	##########################################################
+
+	# Checking if there are more than one DICOM T1 folder for the subject being processed
+	##########################################################
+	if [ ${count_folder} -eq 1 ] # If this is true, the subject only has one DICOM T1 folder
+	then
+		# Assigning the content of the temp variable to a permanent variable
+		subj_DICOM_folder=${subj_DICOM_folder_temp}
+
+		# This list all DICOM files then get just the first one with the "head -n 1" command
+		first_dcm_file01=`ls -1 ${subj_DICOM_folder}/*.dcm | head -n 1`
+
+		# Testing if there are DICOM files here by assessing the content of the "first_dcm_file" variable
+		if [ -n "${first_dcm_file01}" ] && [ -f "${first_dcm_file01}" ]
+		then
+			# Giving feedback to the user
+			echo
+			echo -e "Subject \"${SUBJ}\" has a DICOM T1 folder to be processed"
+
+			##### CREATING THE PPSS COMMAND #####
+			# PPSS COMMAND: Issuing the recon-all command from freesurfer to import the DICOM files and create subject data directory. Note the redirection of all output to /dev/null, since it is also saved in the "recon-all.log" file
+			echo "recon-all -subjid ${SUBJ} -i ${first_dcm_file01} &> ${temp_folder}/${SUBJ}_recon-all_create-fold_output.txt" >> ${temp_folder}/${ppss_command_file}
+
+			##### Creating a LOG file with the commands used for later QA if needed #####
+			echo "OS name and version: ${os_nameandversion}; Command: recon-all; Freesurfer `cat $FREESURFER_HOME/build-stamp.txt`; Date and time: `current_date_time 2`" > ${SUBJECTS_DIR}/LOGFILE_create-directory-structure-for-freesurfer-analysis_reconall_${SUBJ}.txt
+
+			echo -e "Command \"recon-all\" to create the directory structure needed for Freesurfer analysis" >> ${SUBJECTS_DIR}/LOGFILE_create-directory-structure-for-freesurfer-analysis_reconall_${SUBJ}.txt
+
+			echo -e "\nrecon-all -subjid ${SUBJ} -i ${first_dcm_file01} &> ${temp_folder}/${SUBJ}_recon-all_create-fold_output.txt" >> ${SUBJECTS_DIR}/LOGFILE_create-directory-structure-for-freesurfer-analysis_reconall_${SUBJ}.txt
+			#####################################
+
+			# Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+			subj_process="${subj_process} ${SUBJ}"
+		else
+			echo
+			echo -e "Subject \"${SUBJ}\" do not have DICOM files in this folder:\n`echo ${subj_DICOM_folder}`\n"
+
+			echo -e "This subject will not be processed"
+			echo -en "Press any key to continue "
+			read -n1 anykey
+
+			# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+			subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+		fi
+	##########################################################
+
+	##########################################################
+	elif [ ${count_folder} -ge 2 ] # If this is true, the subject has more than one DICOM T1 folder
+	then
+		while [ 1 ]
+		do
+			# Giving feedback to the user
+			echo
+			echo -e "Subject *** ${SUBJ} *** has more than one DICOM T1 folder"
+			echo -e "Please chose from the below which folder is to be used (choose only one):\n"
+
+			# Listing the DICOM T1 folders available for this subject
+			# Establishing the initial numbering
+			count=1
+
+			for item in ${subj_DICOM_folder_temp}
+			do
+				# Getting the file name into a variable
+				item_nameonly=`echo ${item} | awk -F/ '{print $NF}'`
+
+				echo "${count}) ${item_nameonly}"
+
+				# Adding a unit to the numbering variable
+				((count++))
+			done
+
+			# Cleaning the contents of the numbering variable
+			unset count
+
+			echo
+			echo -en "\tPlease enter the number referring to the DICOM T1 folder to be used: "
+			read subj_DICOM_folder_chosen
+
+			if [ -n "${subj_DICOM_folder_chosen}" ] # Checking if this variable is non-zero in length
+			then
+				# Establishing the initial numbering
+				count=1
+
+				# Collecting the subjects listed in the "SUBJLIST" variable into another variable to be used in the FUNCTION "NUMBERED_LIST" (functionslibr_FSL)
+				var1_available=`for item in ${subj_DICOM_folder_temp}; do echo "${count}=${item}"; ((count++)); done` # variable with all the files in a numbered list
+				var2_list="${subj_DICOM_folder_chosen}" # The numbers chosen by the user corresponding to the files to be used
+
+				# Calling the function "numbered_list_display" to present the anatomical files available in a numbered list to the user. Note the parameters to be passed on to the function
+				numbered_list_display "${var1_available}" "${var2_list}"
+
+				# Retrieving the results of the function above from the variable "files_to_use" into a variable to be used by the present script
+				subj_DICOM_folder_chosen=`echo ${files_to_use}`
+
+				# Cleaning the contents of the variables below
+				unset files_to_use count
+
+			elif [ -z "${subj_DICOM_folder_chosen}" ] # Checking if this variable is zero in length.
+			then
+				echo
+				echo -e "*** No folder was choosen ***"
+				echo -e "You need to choose one DICOM T1 folder for this subject"
+
+				echo
+				echo -en "Press any key to go back "
+				read -n1 anykey
+			fi
+
+			# Showing to the user the option entered prior to processing
+			echo -e "\n"
+			echo -e "This is the DICOM T1 folder entered:\n"
+
+			# Establishing the initial numbering
+			count=1
+
+			for item in ${subj_DICOM_folder_chosen}
+			do
+				# Getting the file name into a variable
+				item_nameonly=`echo ${item} | awk -F/ '{print $NF}'`
+
+				echo "${count}) ${item_nameonly}"
+
+				# Adding a unit to the numbering variable
+				((count++))
+			done
+
+			# Cleaning the contents of the numbering variable
+			unset count
+
+			echo
+			echo -en "Is this correct? (y/n) "
+			read yesno
+
+			if [ ${yesno} = y ] || [ ${yesno} = Y ]
+			then
+				# Assigning the content of the temp variable to a permanent variable
+				subj_DICOM_folder=${subj_DICOM_folder_chosen}
+
+				# Going to the processing stage
+				# This list all DICOM files then get just the first one with the "head -n 1" command
+				first_dcm_file01=`ls -1 ${subj_DICOM_folder}/*.dcm | head -n 1`
+
+				# Testing if there are DICOM files here by assessing the content of the "first_dcm_file" variable
+				if [ -n "${first_dcm_file01}" ] && [ -f "${first_dcm_file01}" ]
+				then
+					# Giving feedback to the user
+					echo
+					echo -e "Subject \"${SUBJ}\" has a DICOM T1 folder to be processed"
+
+					##### CREATING THE PPSS COMMAND #####
+					# PPSS COMMAND: Issuing the recon-all command from freesurfer to import the DICOM files and create subject data directory. Note the redirection of all output to /dev/null, since it is also saved in the "recon-all.log" file
+					echo "recon-all -subjid ${SUBJ} -i ${first_dcm_file01} &> ${temp_folder}/${SUBJ}_recon-all_create-fold_output.txt" >> ${temp_folder}/${ppss_command_file}
+
+					##### Creating a LOG file with the commands used for later QA if needed #####
+					echo "OS name and version: ${os_nameandversion}; Command: recon-all; Freesurfer `cat $FREESURFER_HOME/build-stamp.txt`; Date and time: `current_date_time 2`" > ${SUBJECTS_DIR}/LOGFILE_create-directory-structure-for-freesurfer-analysis_reconall_${SUBJ}.txt
+
+					echo -e "Command \"recon-all\" to create the directory structure needed for Freesurfer analysis" >> ${SUBJECTS_DIR}/LOGFILE_create-directory-structure-for-freesurfer-analysis_reconall_${SUBJ}.txt
+
+					echo -e "\nrecon-all -subjid ${SUBJ} -i ${first_dcm_file01} &> ${temp_folder}/${SUBJ}_recon-all_create-fold_output.txt" >> ${SUBJECTS_DIR}/LOGFILE_create-directory-structure-for-freesurfer-analysis_reconall_${SUBJ}.txt
+					#####################################
+
+					# Gathering this subject into a variable for processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+					subj_process="${subj_process} ${SUBJ}"
+				else
+					echo -e "Subject \"${SUBJ}\" do not have DICOM files in this folder:\n`echo ${subj_DICOM_folder_chosen}`\n"
+
+					echo -e "This subject will not be processed"
+					echo -en "Press any key to continue "
+					read -n1 anykey
+
+					# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+					subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+					echo
+				fi
+
+				break
+
+			elif [ ${yesno} = n ] || [ ${yesno} = N ]
+			then
+				echo -e "\n"
+				echo -en "Please correct the DICOM T1 folder to be used "
+
+				sleep 2
+
+				# Cleaning the contents of the variable below
+				unset subj_DICOM_folder subj_DICOM_folder_chosen
+			fi
+		done
+
+	elif [ ${count_folder} -eq 0 ] # If this is true, the subject has NO DICOM T1 folder
+	then
+		echo
+		echo -e "\t *** There was no DICOM T1 folder for subject \"${SUBJ}\" - please check ***"
+		echo -en "Press anykey to continue "
+		read -n1 anykey
+
+		# Gathering this subject into a variable for NOT processing. This will be used by the function "subjects_processed" in functionslibr_FSL
+		subj_NOT_process="${subj_NOT_process} ${SUBJ}"
+	fi
+	##########################################################
+done
+}
+
+###########################################################################
+###############			MAIN MENU ROUTINE			###############
+###########################################################################
+
+##### 			VARIABLES TO BE USED IN THIS SCRIPT 		#####
+# Assigning a variable to hold the main location of the files generated by this script
+temp_folder=/tmp/ppss_tempdir_freesurfer
+
+# Variable with the name for the ppss command file
+ppss_command_file=freesurfer_creasubjfolder_ppsscommand
+
+anat_folder=anat # The name of the folder holding the ANATOMICAL images
+######################################################################
+
+# Script Main menu - Informing the user what this script does and asking for input
+clear
+
+# Changing directory to /tmp in case the script comits some error - this will make any commands to be run within /tmp, preventing damage to the file system
+cd /tmp
+
+# Removing temporary folders and files created, just in case they were not deleted properly by a previously ran script
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a temporary folder to hold the text file with the subjects to be processed
+mkdir ${temp_folder} 2> /dev/null
+
+echo -e "############################################################################"
+echo -e "This program will create the folder structure needed for FREESURFER analysis"
+echo -e "This is the first step prior to proceeding with cortical reconstruction"
+echo -e "############################################################################"
+
+# FUNCTION CALL: Calling function "FS_subj_mainfolder" from "functionslibr_FSL" to check the FREESURFER main analysis folder path
+FS_subj_mainfolder
+
+# Creating a log file. STEP 1 of 2 = start call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 4 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. The calling script and its purposes (separated by a semicolon); 3. The analysis software type (FSL, Freesurfer) related to the script's use; 4. The tools used (e.g., fsl_motion_outliers, fslreorient2std, etc.)
+log_file_scripts_used start "FS_subjfolders:Create the folder structure for FREESURFER analysis" Freesurfer "(freesurfer_subjsfold) recon-all no_flags"
+
+# FUNCTION CALL: Calling function function "freesurfer_subjsfolder" to create each subject folder
+freesurfer_subjsfolder
+
+# Start processing
+echo
+echo -e "##############################################################################"
+echo -e "##### Initiating processing for all subjects with valid DICOM T1 folders #####"
+echo -e "##############################################################################"
+
+# Calling the function "parallel_processing_ppss" to run the command. Note 2 parameters: 1) path to the folder holding the temporary files for this script; 2) the name of the files holding the commands for PPSS to run. Added a 3rd parameter to signal the function "parallel_processing_ppss" that the PPSS log files will be deleted there.
+# Not using the 4th parameter (list of unique identifiers for differentiating commands, e.g. a list of subjects), SO ALL SUBJECT'S FILES ARE PROCESSED IN A ROW, INSTEAD OF ON A SUBJECT-BY-SUBJECT BASIS (FASTER AND OPTIMIZED USE OF PPSS).
+parallel_processing_ppss ${temp_folder} ${ppss_command_file} ppss_function
+
+# Loop to copy the file that captured the screen output of "recon -all" to the subject's folder in the main FREESURFER folder
+for SUBJ_processed in ${subj_process}
+do
+	# Moving the file with output of recon-all to the subject's folder within SUBJECTS_DIR. Note the redirection of all output to /dev/null, as although it completes the file move it complains with: "set owner/group (was: 503/0): Operation not permitted"
+	mv ${temp_folder}/${SUBJ_processed}_recon-all_create-fold_output.txt ${SUBJECTS_DIR}/${SUBJ_processed}/ &> /dev/null
+done
+
+# Instructing the user to look at the output file generated
+echo -e "\n"
+echo -e "Please check within each subject's folder the file \"SUBJID_recon-all_create-fold_output.txt output for any errors"
+
+###### Listing the subjects processed ######
+# FUNCTION CALL: Calls the function "subjects_processed" in functionslibr_FSL to list to the user all subjects processed and those not processed by the script invoking it
+subjects_processed
+################################################
+
+echo
+echo -en "Press any key to go back to the PROCESSING menu "
+read -n1 anykey
+
+# Removing temporary folders and files created
+rm -r ${temp_folder} 2> /dev/null
+
+# Creating a log file. STEP 2 of 2 = finish call
+# Calling the function "log_file_scripts_used" in "functionslibr_FSL" to output the characteristics of this script. It uses 1 parameters: 1. Flag to signal if this function is being called when the calling script starts or when it has finished; 2. List of subjects processed
+log_file_scripts_used finish "${SUBJLIST}"

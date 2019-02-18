@@ -1,0 +1,143 @@
+#! /bin/bash
+
+# Quick and dirty script to change the input COPE files and output directory paths, and add pre-thresholding mask for 2ND LEVEL FSL analysis #
+
+clear
+
+while [ 1 ]
+do
+	# Getting the absolute path for images
+	echo
+	echo -e "This script will change the input COPE files and output directory paths, and add pre-thresholding mask for 2ND LEVEL FSL analysis"
+
+	echo
+	echo -en "Please enter the ABSOLUTE path for the 2nd LEVEL analysis (usually \"/main_folder/project_XXXXX/fmri_data/EXPERIMENT/analysis/2nd_level\"): "
+	read secondlevel_path
+
+	echo
+	echo -en "Now enter the ABSOLUTE PATH where the output file will be saved: "
+	read output_file_path
+
+# 	echo
+# 	echo -en "Now provide a name for the output file (SubjID_design.fsf): "
+# 	read outputfile_name
+
+	echo
+	echo -e "These are the 2nd LEVEL GFEAT folders found in the path provided:"
+
+	echo
+	cd ${secondlevel_path}
+	ls -d1 *.gfeat
+
+	echo
+	echo -en "Enter here the 2nd LEVEL GFEAT folders to be used (if you want ALL of them, just enter \"all\"): "
+	read secondlevel_chosen
+
+	echo
+	echo -e "These are the entered 2nd LEVEL GFEAT folders:\n"
+
+	if [ "$secondlevel_chosen" = all ] || [ "$secondlevel_chosen" = ALL ]
+	then
+		# Variable to assign cope numbering to "all"
+		secondlevel_all=yes
+
+		# Getting all GFEAT folders from the path provided
+		secondlevel_chosen=`ls -d1 ${secondlevel_path}/*.gfeat | sed "s!${secondlevel_path}/!!"`
+
+		for item in ${secondlevel_chosen}
+		do
+			echo $item
+		done
+	else
+		# Variable to assign cope numbering to "all"
+		thresh_images_all=no
+
+		for item in ${secondlevel_chosen}
+		do
+			echo $item
+		done
+	fi
+
+	echo
+	echo -e "This is the path for the output files: ${output_file_path}\n"
+
+	echo -e "The \"subjectID\" will be deteceted from the GFEAT folders name"
+
+	# Putting the locations of input COPE files into variables
+	input_original_path=/Volumes/DroboPro/fmri_data/autism_aim02_analysis/
+	input_new_path=/Volumes/DroboPro/project_autism_aim02/fmri_data/autism_aim02_analysis/
+
+	echo
+	echo -e "Original location for input COPE files: \"${input_original_path}\"\n"
+	echo -e "New location for input COPE files: \"${input_new_path}\""
+
+	# Showing the pre-threshold mask to be used
+	prethresh_mask=`echo ${FSLDIR}/data/standard/MNI152_T1_1mm_brain_mask.nii.gz`
+
+	echo
+	echo -e "Pre-threshold mask file to be used: \"${prethresh_mask}\""
+
+	echo -e "\n"
+	echo -en "Is this correct?(y/n) "
+	read yesno
+
+	case ${yesno} in
+	Y | y)
+		# Going to the /tmp folder in case any errors during script don't delete the wrong files
+		cd /tmp
+
+		for folder in ${secondlevel_chosen}
+		do
+			# Giving info to the user
+			echo
+			echo -en "Processing folder \"${folder}\" and making the requested changes..."
+
+			# Getting the subject ID from the gfeat folder name
+			subjectID=`echo ${folder} | sed 's/.gfeat//'`
+
+			# Copying the design.fsf file to the chosen path
+			cp ${secondlevel_path}/${folder}/design.fsf ${output_file_path}/${subjectID}_design_temp01.fsf
+
+			# Making the necessary modifications in the copied design.fsf file
+			# 1ST CHANGE: modifying the input COPE files and output directory path
+			cat ${output_file_path}/${subjectID}_design_temp01.fsf | sed "s!${input_original_path}!${input_new_path}!g" > ${output_file_path}/${subjectID}_design_temp02.fsf
+
+			# 2ND CHANGE: adding the pre-thresholding mask file
+			cat ${output_file_path}/${subjectID}_design_temp02.fsf | sed 's!set fmri(threshmask) \"\"!set fmri(threshmask) \"'${prethresh_mask}'\"!' > ${output_file_path}/${subjectID}_design.fsf
+
+			# Removing the temp files
+			rm -R ${output_file_path}/${subjectID}_design_temp??.fsf
+
+			# Giving feedback to the user
+			echo
+			echo -e "Done with folder \"${folder}\""
+		done
+
+		# Creating the file to be processed by PPSS using the "touch" command to have a clean file everytime
+		touch ${output_file_path}/PPSS_processing_file.txt
+
+		# Adding all files in the output path into the PPSS file
+		for item in `ls ${output_file_path}/*_design.fsf`
+		do
+			echo $item >> ${output_file_path}/PPSS_processing_file.txt
+		done
+
+		# Giving feedback to the user
+		echo
+		echo -e "\tFinished all folders within this path: \"${secondlevel_path}\"\n"
+
+		echo -e "\tPlease check the output files stored here: \"${output_file_path}\"\n"
+
+		echo -e "\tAnd also the PPSS processing file \"PPSS_processing_file.txt\"\n"
+
+		echo -en "\tPress any key to exit "
+		read -n1 anykey
+
+		break ;;
+	N | n)
+		echo -en "Please correct the information entered "
+		sleep 2 ;;
+	*)
+		echo -en "No valid option chosen " ;;
+	esac
+done
